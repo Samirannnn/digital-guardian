@@ -14,7 +14,125 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      assets: {
+        Row: {
+          block_number: number | null
+          created_at: string
+          hash: string
+          id: string
+          name: string
+          scanned_at: string
+          size: number
+          status: string
+          storage_path: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          block_number?: number | null
+          created_at?: string
+          hash: string
+          id?: string
+          name: string
+          scanned_at?: string
+          size?: number
+          status: string
+          storage_path: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          block_number?: number | null
+          created_at?: string
+          hash?: string
+          id?: string
+          name?: string
+          scanned_at?: string
+          size?: number
+          status?: string
+          storage_path?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      leak_locations: {
+        Row: {
+          app: string
+          asset_id: string
+          city: string
+          confidence: number
+          created_at: string
+          detected_at: string
+          device: string
+          id: string
+          lat: number
+          lon: number
+          user_id: string
+        }
+        Insert: {
+          app: string
+          asset_id: string
+          city: string
+          confidence: number
+          created_at?: string
+          detected_at?: string
+          device: string
+          id?: string
+          lat: number
+          lon: number
+          user_id: string
+        }
+        Update: {
+          app?: string
+          asset_id?: string
+          city?: string
+          confidence?: number
+          created_at?: string
+          detected_at?: string
+          device?: string
+          id?: string
+          lat?: number
+          lon?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "leak_locations_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "assets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          display_name: string | null
+          id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
