@@ -30,20 +30,22 @@ function rndHash() {
 }
 
 export function GlobalAlertsFeed() {
-  const [alerts, setAlerts] = useState<Alert[]>(() =>
-    Array.from({ length: 6 }).map((_, i) => {
-      const s = sample[i % sample.length];
-      return {
-        id: Date.now() + i,
-        ...s,
-        hash: rndHash(),
-        confidence: 75 + Math.floor(Math.random() * 24),
-        ts: new Date(Date.now() - i * 45_000).toISOString(),
-      };
-    }),
-  );
+  const [alerts, setAlerts] = useState<Alert[]>([]);
 
   useEffect(() => {
+    // Seed on the client only to avoid SSR hydration mismatches
+    setAlerts(
+      Array.from({ length: 6 }).map((_, i) => {
+        const s = sample[i % sample.length];
+        return {
+          id: Date.now() + i,
+          ...s,
+          hash: rndHash(),
+          confidence: 75 + Math.floor(Math.random() * 24),
+          ts: new Date(Date.now() - i * 45_000).toISOString(),
+        };
+      }),
+    );
     const t = setInterval(() => {
       const s = sample[Math.floor(Math.random() * sample.length)];
       setAlerts((prev) =>
