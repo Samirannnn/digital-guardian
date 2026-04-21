@@ -293,5 +293,3 @@ function RecentStrip() {
   );
 }
 
-// `toScanResult` is exported by assets.ts for reuse elsewhere
-export { toScanResult };

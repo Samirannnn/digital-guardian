@@ -1,6 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useEffect } from "react";
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
-import { useVault } from "@/lib/vault";
+import { useAssets, useAssetsRealtime } from "@/lib/assets";
+import { useAuth } from "@/lib/auth";
 import { ShieldCheck, AlertOctagon, FolderLock, Hash, Calendar } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -16,20 +18,23 @@ export const Route = createFileRoute("/vault")({
   component: VaultPage,
 });
 
-// Seed assets so the page never feels empty for the demo
-const seed = [
-  { name: "campaign_poster_v3.jpg", status: "leaked" as const, hue: 230 },
-  { name: "product_render_001.png", status: "clean" as const, hue: 160 },
-  { name: "behind_the_scenes.jpg", status: "clean" as const, hue: 280 },
-  { name: "whatsapp_test_photo.jpg", status: "leaked" as const, hue: 20 },
-  { name: "logo_concept_b.png", status: "clean" as const, hue: 200 },
-  { name: "model_shoot_final.jpg", status: "leaked" as const, hue: 340 },
-  { name: "brand_assets_pack.png", status: "clean" as const, hue: 120 },
-  { name: "promo_banner_x.jpg", status: "clean" as const, hue: 60 },
-];
-
 function VaultPage() {
-  const real = useVault();
+  const { session, loading: authLoading } = useAuth();
+  const navigate = useNavigate();
+  const { data: items = [], isLoading } = useAssets();
+  useAssetsRealtime();
+
+  useEffect(() => {
+    if (!authLoading && !session) navigate({ to: "/auth" });
+  }, [authLoading, session, navigate]);
+
+  if (authLoading || !session) {
+    return (
+      <div className="min-h-screen grid place-items-center bg-background">
+        <div className="text-sm text-muted-foreground font-mono">Loading…</div>
+      </div>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -46,34 +51,41 @@ function VaultPage() {
           </p>
         </header>
 
-        <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-          {real.map((it, i) => (
-            <VaultCard
-              key={it.id}
-              name={it.name}
-              status={it.result.status}
-              uploadedAt={it.uploadedAt}
-              hash={it.result.hash}
-              imageUrl={it.url}
-              index={i}
-            />
-          ))}
-          {seed.map((s, i) => (
-            <VaultCard
-              key={s.name}
-              name={s.name}
-              status={s.status}
-              uploadedAt={new Date(Date.now() - (i + 1) * 86400000).toISOString()}
-              hash={Array.from({ length: 64 }, () =>
-                Math.floor(Math.random() * 16).toString(16),
-              ).join("")}
-              gradientHue={s.hue}
-              index={real.length + i}
-            />
-          ))}
-        </div>
+        {isLoading ? (
+          <div className="text-sm text-muted-foreground font-mono">Loading vault…</div>
+        ) : items.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+            {items.map((it, i) => (
+              <VaultCard
+                key={it.id}
+                name={it.name}
+                status={it.status}
+                uploadedAt={it.created_at}
+                hash={it.hash}
+                imageUrl={it.signedUrl ?? undefined}
+                index={i}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </DashboardLayout>
+  );
+}
+
+function EmptyState() {
+  return (
+    <div className="glass rounded-2xl p-10 text-center">
+      <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-xl bg-gradient-to-br from-primary to-cyber glow-primary">
+        <FolderLock className="h-6 w-6 text-primary-foreground" />
+      </div>
+      <h3 className="text-base font-semibold">Your vault is empty</h3>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Head to the dashboard and drop your first asset to register its signature.
+      </p>
+    </div>
   );
 }
 
@@ -83,11 +95,10 @@ type CardProps = {
   uploadedAt: string;
   hash: string;
   imageUrl?: string;
-  gradientHue?: number;
   index: number;
 };
 
-function VaultCard({ name, status, uploadedAt, hash, imageUrl, gradientHue = 220, index }: CardProps) {
+function VaultCard({ name, status, uploadedAt, hash, imageUrl, index }: CardProps) {
   const leaked = status === "leaked";
   return (
     <motion.div
@@ -96,16 +107,11 @@ function VaultCard({ name, status, uploadedAt, hash, imageUrl, gradientHue = 220
       transition={{ delay: Math.min(index * 0.04, 0.5) }}
       className="glass rounded-xl overflow-hidden group hover:ring-1 hover:ring-primary/40 transition-all"
     >
-      <div className="relative aspect-square">
+      <div className="relative aspect-square bg-black/40">
         {imageUrl ? (
           <img src={imageUrl} alt={name} className="h-full w-full object-cover" />
         ) : (
-          <div
-            className="h-full w-full"
-            style={{
-              background: `radial-gradient(circle at 30% 30%, oklch(0.6 0.18 ${gradientHue}) 0%, oklch(0.25 0.08 ${gradientHue}) 70%)`,
-            }}
-          />
+          <div className="h-full w-full bg-gradient-to-br from-primary/20 to-cyber/20" />
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/30" />
 
