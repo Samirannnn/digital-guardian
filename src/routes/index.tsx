@@ -1,6 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { toast } from "sonner";
 import {
   ShieldCheck,
   AlertOctagon,
@@ -13,8 +14,16 @@ import { StatCard } from "@/components/dashboard/StatCard";
 import { UploadZone } from "@/components/dashboard/UploadZone";
 import { ResultView } from "@/components/dashboard/ResultView";
 import { GlobalAlertsFeed } from "@/components/dashboard/GlobalAlertsFeed";
-import { simulateBlockchainCheck, type ScanResult } from "@/lib/dna";
-import { vault, useVault } from "@/lib/vault";
+import type { ScanResult } from "@/lib/dna";
+import { useAuth } from "@/lib/auth";
+import {
+  useAssets,
+  useAssetsRealtime,
+  useRefreshAssets,
+  uploadAssetFile,
+  toScanResult,
+} from "@/lib/assets";
+import { runScan } from "@/lib/scan.functions";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -45,13 +54,25 @@ const stages = [
 ];
 
 function OverviewPage() {
+  const navigate = useNavigate();
+  const { session, user, profile, loading: authLoading } = useAuth();
+
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [stage, setStage] = useState(stages[0]);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [result, setResult] = useState<ScanResult | null>(null);
-  const items = useVault();
 
+  const { data: items = [] } = useAssets();
+  useAssetsRealtime();
+  const refresh = useRefreshAssets();
+
+  // Auth guard
+  useEffect(() => {
+    if (!authLoading && !session) navigate({ to: "/auth" });
+  }, [authLoading, session, navigate]);
+
+  // Progress simulation
   useEffect(() => {
     if (!scanning) return;
     setProgress(0);
@@ -67,33 +88,64 @@ function OverviewPage() {
   }, [scanning]);
 
   const handleFile = async (file: File) => {
+    if (!user) return;
     const url = URL.createObjectURL(file);
     setImageUrl(url);
     setResult(null);
     setScanning(true);
 
-    // TODO: Connect to Polygon/Smart Contract here
-    const r = await simulateBlockchainCheck(file);
+    try {
+      // 1. Upload to Cloud Storage
+      const storagePath = await uploadAssetFile(user.id, file);
 
-    setProgress(100);
-    setTimeout(() => {
-      setScanning(false);
-      setResult(r);
-      vault.add({
-        id: crypto.randomUUID(),
-        name: file.name,
-        url,
-        size: file.size,
-        uploadedAt: new Date().toISOString(),
-        result: r,
+      // 2. Run server-side scan (persists asset + leak_locations under user)
+      const r = await runScan({
+        data: {
+          fileName: file.name,
+          fileSize: file.size,
+          storagePath,
+        },
       });
-    }, 250);
+
+      setProgress(100);
+      setTimeout(() => {
+        setScanning(false);
+        setResult({
+          hash: r.hash,
+          status: r.status,
+          scannedAt: r.scannedAt,
+          blockNumber: r.blockNumber,
+          locations: r.locations,
+        });
+        refresh();
+        toast.success(
+          r.status === "leaked"
+            ? `Leak detected in ${r.locations.length} location${r.locations.length > 1 ? "s" : ""}`
+            : "Asset registered — no leaks found",
+        );
+      }, 250);
+    } catch (err) {
+      setScanning(false);
+      setImageUrl(null);
+      const msg = err instanceof Error ? err.message : "Scan failed";
+      toast.error(msg);
+    }
   };
 
   const totalLeaks = items.reduce(
-    (n, i) => n + (i.result.status === "leaked" ? i.result.locations.length : 0),
+    (n, i) => n + (i.status === "leaked" ? i.locations.length : 0),
     0,
   );
+
+  if (authLoading || !session) {
+    return (
+      <div className="min-h-screen grid place-items-center bg-background">
+        <div className="text-sm text-muted-foreground font-mono">Loading…</div>
+      </div>
+    );
+  }
+
+  const displayName = profile?.display_name || user?.email?.split("@")[0] || "Creator";
 
   return (
     <DashboardLayout>
@@ -104,7 +156,7 @@ function OverviewPage() {
             Digital DNA · Overview
           </div>
           <h1 className="mt-1 text-2xl lg:text-3xl font-bold tracking-tight">
-            Welcome back, <span className="text-gradient-primary">Souhrid</span>
+            Welcome back, <span className="text-gradient-primary">{displayName}</span>
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {totalLeaks > 0
@@ -117,17 +169,17 @@ function OverviewPage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
           <StatCard
             label="Protected Assets"
-            value={String(248 + items.length)}
-            delta={`+${items.length || 12} this week`}
+            value={String(items.length)}
+            delta={items.length > 0 ? `${items.length} on-chain` : "Get started"}
             icon={Boxes}
             accent="primary"
             index={0}
           />
           <StatCard
             label="Active Leaks"
-            value={String(7 + totalLeaks)}
-            delta={`+${totalLeaks || 2} new`}
-            trend="down"
+            value={String(totalLeaks)}
+            delta={totalLeaks > 0 ? `${totalLeaks} detection${totalLeaks > 1 ? "s" : ""}` : "All clear"}
+            trend={totalLeaks > 0 ? "down" : "up"}
             icon={AlertOctagon}
             accent="crimson"
             index={1}
@@ -196,8 +248,9 @@ function OverviewPage() {
 }
 
 function RecentStrip() {
-  const items = useVault().slice(0, 6);
-  if (items.length === 0) return null;
+  const { data: items = [] } = useAssets();
+  const recent = items.slice(0, 6);
+  if (recent.length === 0) return null;
   return (
     <div className="glass rounded-2xl p-4">
       <div className="flex items-center justify-between mb-3">
@@ -207,11 +260,16 @@ function RecentStrip() {
         </span>
       </div>
       <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-        {items.map((it) => {
-          const leaked = it.result.status === "leaked";
+        {recent.map((it) => {
+          const leaked = it.status === "leaked";
           return (
-            <div key={it.id} className="relative aspect-square rounded-lg overflow-hidden group">
-              <img src={it.url} alt={it.name} className="h-full w-full object-cover" />
+            <div
+              key={it.id}
+              className="relative aspect-square rounded-lg overflow-hidden group bg-black/30"
+            >
+              {it.signedUrl ? (
+                <img src={it.signedUrl} alt={it.name} className="h-full w-full object-cover" />
+              ) : null}
               <div className="absolute inset-0 bg-gradient-to-t from-black/85 to-transparent" />
               <div
                 className={`absolute top-1.5 right-1.5 grid h-5 w-5 place-items-center rounded-full ${
@@ -234,3 +292,6 @@ function RecentStrip() {
     </div>
   );
 }
+
+// `toScanResult` is exported by assets.ts for reuse elsewhere
+export { toScanResult };
