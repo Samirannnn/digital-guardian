@@ -21,7 +21,6 @@ import {
   useAssetsRealtime,
   useRefreshAssets,
   uploadAssetFile,
-  toScanResult,
 } from "@/lib/assets";
 import { runScan } from "@/lib/scan.functions";
 
