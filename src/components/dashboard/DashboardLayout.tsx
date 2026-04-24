@@ -7,7 +7,6 @@ import {
   FolderLock,
   AlertTriangle,
   Globe2,
-  Settings2,
 } from "lucide-react";
 
 const mobileItems = [
@@ -15,7 +14,6 @@ const mobileItems = [
   { to: "/vault", label: "Vault", icon: FolderLock },
   { to: "/alerts", label: "Alerts", icon: AlertTriangle },
   { to: "/map", label: "Map", icon: Globe2 },
-  { to: "/settings", label: "API", icon: Settings2 },
 ];
 
 export function DashboardLayout({ children }: { children: ReactNode }) {

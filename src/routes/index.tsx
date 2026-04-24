@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import {
   ShieldCheck,
   AlertOctagon,
-  Globe2,
   Boxes,
   Cpu,
 } from "lucide-react";
@@ -13,7 +12,7 @@ import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { UploadZone } from "@/components/dashboard/UploadZone";
 import { ResultView } from "@/components/dashboard/ResultView";
-import { GlobalAlertsFeed } from "@/components/dashboard/GlobalAlertsFeed";
+import { SecurityAlertBanner } from "@/components/dashboard/SecurityAlertBanner";
 import type { ScanResult } from "@/lib/dna";
 import { useAuth } from "@/lib/auth";
 import {
@@ -61,6 +60,7 @@ function OverviewPage() {
   const [stage, setStage] = useState(stages[0]);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [result, setResult] = useState<ScanResult | null>(null);
+  const [leakAlert, setLeakAlert] = useState<{ fileName: string; result: ScanResult } | null>(null);
 
   const { data: items = [] } = useAssets();
   useAssetsRealtime();
@@ -109,19 +109,24 @@ function OverviewPage() {
       setProgress(100);
       setTimeout(() => {
         setScanning(false);
-        setResult({
+        const scanResult: ScanResult = {
           hash: r.hash,
           status: r.status,
           scannedAt: r.scannedAt,
           blockNumber: r.blockNumber,
           locations: r.locations,
-        });
+        };
+        setResult(scanResult);
         refresh();
-        toast.success(
-          r.status === "leaked"
-            ? `Leak detected in ${r.locations.length} location${r.locations.length > 1 ? "s" : ""}`
-            : "Asset registered — no leaks found",
-        );
+        if (r.status === "leaked") {
+          setLeakAlert({ fileName: file.name, result: scanResult });
+          toast.error(
+            `🚨 Leak detected in ${r.locations.length} location${r.locations.length > 1 ? "s" : ""}`,
+            { duration: 6000 },
+          );
+        } else {
+          toast.success("Asset registered — no leaks found");
+        }
       }, 250);
     } catch (err) {
       setScanning(false);
@@ -164,8 +169,20 @@ function OverviewPage() {
           </p>
         </div>
 
+        {/* Security Alert Banner — shown when a scan detects a leak */}
+        <AnimatePresence>
+          {leakAlert && (
+            <SecurityAlertBanner
+              key="leak-banner"
+              fileName={leakAlert.fileName}
+              result={leakAlert.result}
+              onDismiss={() => setLeakAlert(null)}
+            />
+          )}
+        </AnimatePresence>
+
         {/* Stats */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 lg:gap-4">
           <StatCard
             label="Protected Assets"
             value={String(items.length)}
@@ -183,63 +200,49 @@ function OverviewPage() {
             accent="crimson"
             index={1}
           />
-          <StatCard
-            label="Global Shares Tracked"
-            value="14.2K"
-            delta="+312 / 24h"
-            icon={Globe2}
-            accent="cyber"
-            index={2}
-          />
+
           <StatCard
             label="Blockchain Sync"
             value="100%"
             delta="Polygon · 18ms"
             icon={Cpu}
             accent="emerald"
-            index={3}
+            index={2}
           />
         </div>
 
-        {/* Main grid */}
-        <div className="grid gap-4 lg:grid-cols-3">
-          <div className="lg:col-span-2 space-y-4">
-            <AnimatePresence mode="wait">
-              {result && imageUrl ? (
-                <ResultView
-                  key="result"
-                  imageUrl={imageUrl}
-                  result={result}
-                  onClose={() => {
-                    setResult(null);
-                    setImageUrl(null);
-                  }}
+        {/* Main content */}
+        <div className="space-y-4">
+          <AnimatePresence mode="wait">
+            {result && imageUrl ? (
+              <ResultView
+                key="result"
+                imageUrl={imageUrl}
+                result={result}
+                onClose={() => {
+                  setResult(null);
+                  setImageUrl(null);
+                }}
+              />
+            ) : (
+              <motion.div
+                key="upload"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+              >
+                <UploadZone
+                  onFile={handleFile}
+                  scanning={scanning}
+                  progress={progress}
+                  stage={stage}
                 />
-              ) : (
-                <motion.div
-                  key="upload"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                >
-                  <UploadZone
-                    onFile={handleFile}
-                    scanning={scanning}
-                    progress={progress}
-                    stage={stage}
-                  />
-                </motion.div>
-              )}
-            </AnimatePresence>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-            {/* Recent uploads strip */}
-            <RecentStrip />
-          </div>
-
-          {/* Right column */}
-          <div className="lg:col-span-1">
-            <GlobalAlertsFeed />
-          </div>
+          {/* Recent uploads strip */}
+          <RecentStrip />
         </div>
       </div>
     </DashboardLayout>
