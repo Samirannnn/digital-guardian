@@ -100,7 +100,7 @@ function AlertsPage() {
         </header>
 
         {/* Severity summary */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {[
             { label: "Critical", count: criticalCount, cls: "text-crimson border-crimson/30" },
             { label: "High", count: highCount, cls: "text-orange-400 border-orange-500/30" },
