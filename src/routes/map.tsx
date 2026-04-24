@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { WorldMap } from "@/components/dashboard/WorldMap";
+import { useAssets, useAssetsRealtime } from "@/lib/assets";
 import { Globe2, Radio } from "lucide-react";
-import type { LeakLocation } from "@/lib/dna";
 
 export const Route = createFileRoute("/map")({
   head: () => ({
@@ -16,17 +16,15 @@ export const Route = createFileRoute("/map")({
   component: MapPage,
 });
 
-const pins: LeakLocation[] = [
-  { city: "Kolkata", country: "IN", lat: 22.57, lng: 88.36, device: "Realme 8", app: "WhatsApp", confidence: 94, timestamp: "" },
-  { city: "Mumbai", country: "IN", lat: 19.07, lng: 72.88, device: "Samsung A52", app: "Telegram", confidence: 88, timestamp: "" },
-  { city: "Dubai", country: "AE", lat: 25.27, lng: 55.3, device: "iPhone 12", app: "Instagram", confidence: 76, timestamp: "" },
-  { city: "Lagos", country: "NG", lat: 6.52, lng: 3.38, device: "Tecno Spark", app: "WhatsApp", confidence: 81, timestamp: "" },
-  { city: "São Paulo", country: "BR", lat: -23.55, lng: -46.63, device: "Xiaomi Redmi", app: "WhatsApp", confidence: 91, timestamp: "" },
-  { city: "Manila", country: "PH", lat: 14.6, lng: 120.98, device: "Oppo A15", app: "Snapchat", confidence: 72, timestamp: "" },
-  { city: "Cairo", country: "EG", lat: 30.04, lng: 31.24, device: "Infinix Hot", app: "Telegram", confidence: 79, timestamp: "" },
-];
-
 function MapPage() {
+  const { data: assets = [] } = useAssets();
+  useAssetsRealtime();
+
+  // Extract all locations only from leaked assets
+  const pins = assets
+    .filter((a) => a.status === "leaked")
+    .flatMap((a) => a.locations);
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -60,8 +58,8 @@ function MapPage() {
                 <div className="grid h-8 w-8 place-items-center rounded-lg bg-primary/15 text-primary text-[10px] font-mono">
                   {p.country}
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium">{p.city}</div>
+                <div className="flex-1 min-w-0 py-1">
+                  <div className="text-sm font-medium">{p.city || "Unknown Location"}</div>
                   <div className="text-[11px] text-muted-foreground font-mono">
                     {p.device} · {p.app}
                   </div>

@@ -192,3 +192,22 @@
   }
   .animate-float { animation: float 4s ease-in-out infinite; }
 }
+
+/* Leaflet Dark Popup Overrides */
+.dark-popup .leaflet-popup-content-wrapper {
+  background-color: #0e0e0e;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
+}
+.dark-popup .leaflet-popup-tip {
+  background-color: #0e0e0e;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.dark-popup .leaflet-popup-close-button {
+  color: #a1a1aa !important;
+}
+.custom-leak-marker {
+  background: none;
+  border: none;
+}
