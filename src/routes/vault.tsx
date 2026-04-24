@@ -3,8 +3,10 @@ import { useEffect } from "react";
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { useAssets, useAssetsRealtime } from "@/lib/assets";
 import { useAuth } from "@/lib/auth";
-import { ShieldCheck, AlertOctagon, FolderLock, Hash, Calendar } from "lucide-react";
-import { motion } from "framer-motion";
+import { ShieldCheck, AlertOctagon, FolderLock, Hash, Calendar, ArrowLeft } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { toScanResult, type AssetWithLocations } from "@/lib/assets";
+import { ResultView } from "@/components/dashboard/ResultView";
 
 export const Route = createFileRoute("/vault")({
   head: () => ({
@@ -22,6 +24,7 @@ function VaultPage() {
   const { session, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const { data: items = [], isLoading } = useAssets();
+  const [selectedAsset, setSelectedAsset] = useState<AssetWithLocations | null>(null);
   useAssetsRealtime();
 
   useEffect(() => {
@@ -46,15 +49,33 @@ function VaultPage() {
           <h1 className="mt-1 text-2xl lg:text-3xl font-bold tracking-tight">
             Protected Library
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Every asset is fingerprinted and anchored on-chain. Click any item to inspect its signature.
-          </p>
+          {selectedAsset ? (
+            <button
+              onClick={() => setSelectedAsset(null)}
+              className="mt-4 flex items-center gap-1.5 text-sm text-primary hover:text-primary/80 transition-colors font-medium w-fit"
+            >
+              <ArrowLeft size={16} /> Back to Vault
+            </button>
+          ) : (
+            <p className="mt-1 text-sm text-muted-foreground">
+              Every asset is fingerprinted and anchored on-chain. Click any item to inspect its signature.
+            </p>
+          )}
         </header>
 
         {isLoading ? (
           <div className="text-sm text-muted-foreground font-mono">Loading vault…</div>
         ) : items.length === 0 ? (
           <EmptyState />
+        ) : selectedAsset ? (
+          <AnimatePresence mode="wait">
+            <ResultView
+              key="result"
+              imageUrl={selectedAsset.signedUrl ?? ""}
+              result={toScanResult(selectedAsset)}
+              onClose={() => setSelectedAsset(null)}
+            />
+          </AnimatePresence>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
             {items.map((it, i) => (
@@ -66,6 +87,7 @@ function VaultPage() {
                 hash={it.hash}
                 imageUrl={it.signedUrl ?? undefined}
                 index={i}
+                onClick={() => setSelectedAsset(it)}
               />
             ))}
           </div>
@@ -96,16 +118,18 @@ type CardProps = {
   hash: string;
   imageUrl?: string;
   index: number;
+  onClick: () => void;
 };
 
-function VaultCard({ name, status, uploadedAt, hash, imageUrl, index }: CardProps) {
+function VaultCard({ name, status, uploadedAt, hash, imageUrl, index, onClick }: CardProps) {
   const leaked = status === "leaked";
   return (
-    <motion.div
+    <motion.button
+      onClick={onClick}
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: Math.min(index * 0.04, 0.5) }}
-      className="glass rounded-xl overflow-hidden group hover:ring-1 hover:ring-primary/40 transition-all"
+      className="glass rounded-xl overflow-hidden group hover:ring-1 hover:ring-primary/40 transition-all text-left w-full cursor-pointer flex flex-col"
     >
       <div className="relative aspect-square bg-black/40">
         {imageUrl ? (
@@ -142,6 +166,6 @@ function VaultCard({ name, status, uploadedAt, hash, imageUrl, index }: CardProp
           {leaked ? "● ALERT" : "● SAFE"}
         </span>
       </div>
-    </motion.div>
+    </motion.button>
   );
 }
