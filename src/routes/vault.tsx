@@ -3,9 +3,10 @@ import { useEffect, useState } from "react";
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { useAssets, useAssetsRealtime } from "@/lib/assets";
 import { useAuth } from "@/lib/auth";
-import { ShieldCheck, AlertOctagon, FolderLock, Hash, Calendar, ArrowLeft } from "lucide-react";
+import { ShieldCheck, AlertOctagon, FolderLock, Hash, Calendar, ArrowLeft, Trash2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { toScanResult, type AssetWithLocations } from "@/lib/assets";
+import { toast } from "sonner";
+import { toScanResult, deleteAsset, type AssetWithLocations } from "@/lib/assets";
 import { ResultView } from "@/components/dashboard/ResultView";
 
 export const Route = createFileRoute("/vault")({
@@ -23,9 +24,30 @@ export const Route = createFileRoute("/vault")({
 function VaultPage() {
   const { session, loading: authLoading } = useAuth();
   const navigate = useNavigate();
-  const { data: items = [], isLoading } = useAssets();
+  const { data: items = [], isLoading, refetch } = useAssets();
   const [selectedAsset, setSelectedAsset] = useState<AssetWithLocations | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   useAssetsRealtime();
+
+  const handleDelete = async (asset: AssetWithLocations, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirm(`Are you sure you want to delete "${asset.name}"? This cannot be undone.`)) {
+      setIsDeleting(true);
+      try {
+        await deleteAsset(asset.id, asset.storage_path);
+        toast.success(`Deleted "${asset.name}"`);
+        if (selectedAsset?.id === asset.id) {
+          setSelectedAsset(null);
+        }
+        refetch();
+      } catch (err) {
+        toast.error("Failed to delete asset.");
+        console.error(err);
+      } finally {
+        setIsDeleting(false);
+      }
+    }
+  };
 
   useEffect(() => {
     if (!authLoading && !session) navigate({ to: "/auth" });
@@ -88,6 +110,7 @@ function VaultPage() {
                 imageUrl={it.signedUrl ?? undefined}
                 index={i}
                 onClick={() => setSelectedAsset(it)}
+                onDelete={(e) => handleDelete(it, e)}
               />
             ))}
           </div>
@@ -119,17 +142,18 @@ type CardProps = {
   imageUrl?: string;
   index: number;
   onClick: () => void;
+  onDelete: (e: React.MouseEvent) => void;
 };
 
-function VaultCard({ name, status, uploadedAt, hash, imageUrl, index, onClick }: CardProps) {
+function VaultCard({ name, status, uploadedAt, hash, imageUrl, index, onClick, onDelete }: CardProps) {
   const leaked = status === "leaked";
   return (
-    <motion.button
+    <motion.div
       onClick={onClick}
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: Math.min(index * 0.04, 0.5) }}
-      className="glass rounded-xl overflow-hidden group hover:ring-1 hover:ring-primary/40 transition-all text-left w-full cursor-pointer flex flex-col"
+      className="glass rounded-xl overflow-hidden group hover:ring-1 hover:ring-primary/40 transition-all text-left w-full cursor-pointer flex flex-col relative"
     >
       <div className="relative aspect-square bg-black/40">
         {imageUrl ? (
@@ -150,6 +174,14 @@ function VaultCard({ name, status, uploadedAt, hash, imageUrl, index, onClick }:
           {leaked ? "Compromised" : "Protected"}
         </div>
 
+        <button
+          onClick={onDelete}
+          className="absolute top-2 right-2 grid h-7 w-7 place-items-center rounded-lg bg-black/40 text-muted-foreground hover:bg-crimson/80 hover:text-white backdrop-blur-md transition-colors opacity-0 group-hover:opacity-100"
+          aria-label="Delete asset"
+        >
+          <Trash2 size={12} />
+        </button>
+
         <div className="absolute bottom-0 inset-x-0 p-3">
           <div className="text-xs font-medium truncate">{name}</div>
           <div className="mt-1 flex items-center gap-1 text-[10px] font-mono text-muted-foreground">
@@ -166,6 +198,6 @@ function VaultCard({ name, status, uploadedAt, hash, imageUrl, index, onClick }:
           {leaked ? "● ALERT" : "● SAFE"}
         </span>
       </div>
-    </motion.button>
+    </motion.div>
   );
 }

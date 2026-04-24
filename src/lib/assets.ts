@@ -131,3 +131,17 @@ export async function uploadAssetFile(userId: string, file: File): Promise<strin
   if (error) throw error;
   return path;
 }
+
+// Delete an asset from database and storage
+export async function deleteAsset(id: string, storagePath: string) {
+  // 1. Remove from storage
+  if (storagePath) {
+    const { error: storageError } = await supabase.storage.from("assets").remove([storagePath]);
+    if (storageError) console.error("Failed to delete storage file:", storageError);
+  }
+
+  // 2. Remove from DB (delete locations first in case no cascade)
+  await supabase.from("leak_locations").delete().eq("asset_id", id);
+  const { error } = await supabase.from("assets").delete().eq("id", id);
+  if (error) throw error;
+}
