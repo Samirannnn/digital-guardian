@@ -47,8 +47,8 @@ export async function runScan(input: {
     isLeak = true;
     status = "leaked";
   } else {
-    // If not found, register it under this user
-    await protectPHash(hash, user.id);
+    // If not found, register it under this user's email
+    await protectPHash(hash, user.email || user.id);
   }
 
   // Fallback / mock leak simulation for demonstration purposes
