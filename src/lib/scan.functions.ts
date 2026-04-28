@@ -1,21 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { LeakLocation, ScanResult } from "./dna";
 
-// Mock pHash generator (deterministic from name+size)
-function generateHash(seed: string): string {
-  let h = 2166136261 >>> 0;
-  for (let i = 0; i < seed.length; i++) {
-    h ^= seed.charCodeAt(i);
-    h = (h * 16777619) >>> 0;
-  }
-  const chars = "0123456789abcdef";
-  let out = "";
-  for (let i = 0; i < 64; i++) {
-    h = (h * 1664525 + 1013904223) >>> 0;
-    out += chars[(h >>> (i % 28)) & 0xf];
-  }
-  return out;
-}
+// Removed mock pHash generator
 
 const cities = [
   { city: "Kolkata", country: "IN", lat: 22.57, lng: 88.36 },
@@ -28,8 +14,10 @@ const cities = [
 const devices = ["Realme 8", "Samsung A52", "iPhone 13", "Pixel 7", "OnePlus Nord", "Xiaomi 12"];
 const apps = ["WhatsApp", "Telegram", "Instagram DM", "Signal", "Snapchat"];
 
+import { generatePHash, searchPHash, protectPHash } from "./phash";
+
 /**
- * Client-side scan — generates pHash, runs mock leak detection,
+ * Client-side scan — generates pHash, runs Cloud Run API leak detection,
  * and persists the asset + any leak locations to Supabase.
  */
 export async function runScan(input: {
@@ -37,19 +25,33 @@ export async function runScan(input: {
     fileName: string;
     fileSize: number;
     storagePath: string;
+    file: File;
   };
 }): Promise<ScanResult & { assetId: string }> {
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) throw new Error("Not authenticated");
 
-  const { fileName, fileSize, storagePath } = input.data;
+  const { fileName, fileSize, storagePath, file } = input.data;
 
-  // Simulate the blockchain query delay
-  await new Promise((r) => setTimeout(r, 3000));
+  // Generate real pHash
+  const hash = await generatePHash(file);
 
-  const hash = generateHash(fileName + fileSize);
+  // Call Cloud Run API to check for matches
+  const searchResult = await searchPHash(hash);
+  
+  let isLeak = false;
+  if (searchResult.matchFound && searchResult.owner !== user.id) {
+    isLeak = true;
+  } else if (!searchResult.matchFound) {
+    // If not found, protect it under this user
+    await protectPHash(hash, user.id);
+  }
+
+  // Fallback / mock leak simulation for demonstration purposes
   const forceLeak = /whats|leak|test/i.test(fileName);
-  const isLeak = forceLeak || Math.random() > 0.45;
+  if (forceLeak) {
+    isLeak = true;
+  }
   const blockNumber = 18_452_193 + Math.floor(Math.random() * 999);
   const scannedAt = new Date().toISOString();
 

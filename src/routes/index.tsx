@@ -103,6 +103,7 @@ function OverviewPage() {
           fileName: file.name,
           fileSize: file.size,
           storagePath,
+          file,
         },
       });
 
