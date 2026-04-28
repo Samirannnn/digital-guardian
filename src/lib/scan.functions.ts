@@ -36,21 +36,19 @@ export async function runScan(input: {
 
   // Generate real pHash
   const hash = await generatePHash(file);
-
-  // Call Cloud Run API to check for matches
-  const searchResult = await searchPHash(hash);
   
   let isLeak = false;
   let status: "clean" | "leaked" = "clean";
 
-  if (searchResult.match_found) {
-    // If ANY match is found, flag it as detected/leaked
-    isLeak = true;
-    status = "leaked";
-  } else {
-    if (mode === "protect") {
-      // If not found and in protect mode, register it under this user
-      await protectPHash(hash, user.id);
+  if (mode === "protect") {
+    // In protect mode, we just register the asset (Generate DNA and Protect)
+    await protectPHash(hash, user.id);
+  } else if (mode === "check") {
+    // In check mode, we only search for leaks
+    const searchResult = await searchPHash(hash);
+    if (searchResult.match_found) {
+      isLeak = true;
+      status = "leaked";
     }
   }
 
