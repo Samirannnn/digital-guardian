@@ -106,7 +106,7 @@ export async function searchPHash(phash: string): Promise<{ matchFound: boolean;
     const res = await fetch(`${API_BASE}/search`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phash })
+      body: JSON.stringify({ hash: phash })
     });
     if (!res.ok) throw new Error("Search API failed");
     return await res.json();
@@ -121,7 +121,7 @@ export async function protectPHash(phash: string, owner: string): Promise<any> {
     const res = await fetch(`${API_BASE}/protect`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phash, owner })
+      body: JSON.stringify({ hash: phash, owner })
     });
     if (!res.ok) throw new Error("Protect API failed");
     return await res.json();
