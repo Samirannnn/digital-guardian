@@ -7,9 +7,10 @@ type Props = {
   scanning: boolean;
   progress: number;
   stage: string;
+  mode?: "protect" | "check";
 };
 
-export function UploadZone({ onFile, scanning, progress, stage }: Props) {
+export function UploadZone({ onFile, scanning, progress, stage, mode = "protect" }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [drag, setDrag] = useState(false);
 
@@ -67,11 +68,16 @@ export function UploadZone({ onFile, scanning, progress, stage }: Props) {
                 </div>
               </div>
               <h3 className="text-xl font-semibold tracking-tight">
-                Drop an image to generate its <span className="text-gradient-primary">Digital DNA</span>
+                {mode === "protect" ? (
+                  <>Drop an image to generate its <span className="text-gradient-primary">Digital DNA</span></>
+                ) : (
+                  <>Drop an image to <span className="text-gradient-primary">Check for Leaks</span></>
+                )}
               </h3>
               <p className="mt-2 text-sm text-muted-foreground max-w-md">
-                We compute a perceptual hash and query the blockchain ledger for unauthorized
-                redistribution across the Android network.
+                {mode === "protect"
+                  ? "We compute a perceptual hash and register your asset on the blockchain to protect it from redistribution."
+                  : "We compute a perceptual hash and query the network to see if this asset is already protected or leaked."}
               </p>
               <div className="mt-5 flex items-center gap-2 text-[11px] font-mono text-muted-foreground">
                 <FileImage size={13} /> JPG · PNG · WebP
