@@ -28,7 +28,7 @@ export async function generatePHash(file: File): Promise<string> {
           const g = data[i + 1];
           const b = data[i + 2];
           const pixelIndex = i / 4;
-          grayscale[pixelIndex] = 0.299 * r + 0.587 * g + 0.114 * b;
+          grayscale[pixelIndex] = Math.trunc(0.299 * r + 0.587 * g + 0.114 * b);
         }
 
         // 2. Apply DCT
