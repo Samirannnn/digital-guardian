@@ -1,24 +1,15 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { LeakLocation, ScanResult } from "./dna";
-
-// Removed mock pHash generator
-
-const cities = [
-  { city: "Kolkata", country: "IN", lat: 22.57, lng: 88.36 },
-  { city: "Mumbai", country: "IN", lat: 19.07, lng: 72.88 },
-  { city: "Dubai", country: "AE", lat: 25.27, lng: 55.3 },
-  { city: "Jakarta", country: "ID", lat: -6.21, lng: 106.85 },
-  { city: "Lagos", country: "NG", lat: 6.52, lng: 3.38 },
-  { city: "São Paulo", country: "BR", lat: -23.55, lng: -46.63 },
-];
-const devices = ["Realme 8", "Samsung A52", "iPhone 13", "Pixel 7", "OnePlus Nord", "Xiaomi 12"];
-const apps = ["WhatsApp", "Telegram", "Instagram DM", "Signal", "Snapchat"];
-
-import { generatePHash, searchPHash, protectPHash } from "./phash";
+import { generatePHash, searchPHash, protectPHash, getEnforcement } from "./phash";
 
 /**
- * Client-side scan — generates pHash, runs Cloud Run API leak detection,
- * and persists the asset + any leak locations to Supabase.
+ * Client-side scan pipeline:
+ *  1. Generate pHash (identical to Android PHashGenerator)
+ *  2. POST /search  — check blockchain for existing match
+ *  3a. If MATCH FOUND → asset is LEAKED (someone else registered it already)
+ *  3b. If NO MATCH   → POST /protect to register this user as owner
+ *  4. Check /enforcement — if owner flagged blur, mark enforced
+ *  5. Persist asset + leak_locations to Supabase
  */
 export async function runScan(input: {
   data: {
@@ -28,38 +19,44 @@ export async function runScan(input: {
     file: File;
   };
 }): Promise<ScanResult & { assetId: string }> {
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
   if (authError || !user) throw new Error("Not authenticated");
 
   const { fileName, fileSize, storagePath, file } = input.data;
+  const ownerEmail = user.email || user.id;
 
-  // Generate real pHash
+  // ── Step 1: Generate pHash (matches Android app exactly) ─────────────────
   const hash = await generatePHash(file);
 
-  // Call Cloud Run API to check for matches
+  // ── Step 2: Search blockchain ─────────────────────────────────────────────
   const searchResult = await searchPHash(hash);
-  
-  let isLeak = false;
+
   let status: "clean" | "leaked" = "clean";
+  let leakOwner = "";
+  let leakSim = 0;
 
   if (searchResult.match_found) {
-    // If ANY match is found, flag it as detected/leaked
-    isLeak = true;
+    // Hash already registered by someone else → LEAKED
     status = "leaked";
+    leakOwner = searchResult.user_id;
+    leakSim = searchResult.sim;
   } else {
-    // If not found, register it under this user's email
-    await protectPHash(hash, user.email || user.id);
+    // New image — register this user as the authorized owner
+    await protectPHash(hash, ownerEmail);
   }
 
-  // Fallback / mock leak simulation for demonstration purposes
-  const forceLeak = /whats|leak|test/i.test(fileName);
-  if (forceLeak) {
-    isLeak = true;
-  }
-  const blockNumber = 18_452_193 + Math.floor(Math.random() * 999);
+  // ── Step 3: Check enforcement status ─────────────────────────────────────
+  const enforcement = await getEnforcement(hash);
+  const isEnforced = enforcement.isEnforced;
+
+  // ── Step 4: Build block metadata ─────────────────────────────────────────
+  const blockNumber = 18_452_193 + Math.floor(Math.random() * 9999);
   const scannedAt = new Date().toISOString();
 
-  // Insert asset
+  // ── Step 5: Persist asset to Supabase ────────────────────────────────────
   const { data: asset, error: aErr } = await supabase
     .from("assets")
     .insert({
@@ -79,34 +76,38 @@ export async function runScan(input: {
     throw new Error(`Failed to save asset: ${aErr?.message ?? "unknown"}`);
   }
 
+  // ── Step 6: If leaked, build leak location from API response ─────────────
   let locations: LeakLocation[] = [];
-  if (isLeak) {
-    const count = forceLeak ? 1 : 1 + Math.floor(Math.random() * 3);
-    locations = Array.from({ length: count }).map((_, i) => {
-      const c = forceLeak ? cities[0] : cities[Math.floor(Math.random() * cities.length)];
-      return {
-        ...c,
-        device: forceLeak && i === 0 ? "Realme 8" : devices[Math.floor(Math.random() * devices.length)],
-        app: forceLeak && i === 0 ? "WhatsApp" : apps[Math.floor(Math.random() * apps.length)],
-        confidence: forceLeak && i === 0 ? 94 : 72 + Math.floor(Math.random() * 25),
-        timestamp: new Date(Date.now() - Math.random() * 86_400_000 * 3).toISOString(),
-      };
-    });
 
-    const rows = locations.map((l) => ({
+  if (status === "leaked") {
+    // Real leak: we know the owner who registered it and the similarity
+    // The API returns the user_id (email) of the first uploader
+    // We create one location entry representing the detected leak source
+    const leakLocation: LeakLocation = {
+      city: "Unknown",
+      country: "",
+      lat: 0,
+      lng: 0,
+      device: "Unknown Device",
+      app: "Unknown App",
+      confidence: Math.round(leakSim * 100),
+      timestamp: scannedAt,
+    };
+
+    locations = [leakLocation];
+
+    // Persist leak_location row
+    await supabase.from("leak_locations").insert({
       asset_id: asset.id,
       user_id: user.id,
-      city: l.city,
-      lat: l.lat,
-      lon: l.lng,
-      device: l.device,
-      app: l.app,
-      confidence: l.confidence,
-      detected_at: l.timestamp,
-    }));
-
-    const { error: lErr } = await supabase.from("leak_locations").insert(rows);
-    if (lErr) console.error("leak_locations insert failed", lErr.message);
+      city: leakLocation.city,
+      lat: leakLocation.lat,
+      lon: leakLocation.lng,
+      device: leakLocation.device,
+      app: leakLocation.app,
+      confidence: leakLocation.confidence,
+      detected_at: leakLocation.timestamp,
+    });
   }
 
   return {
