@@ -40,9 +40,10 @@ export async function runScan(input: {
   const searchResult = await searchPHash(hash);
   
   let isLeak = false;
-  if (searchResult.matchFound && searchResult.owner !== user.id) {
+  if (searchResult.match_found) {
+    // If ANY match is found (even from same user), flag it as detected/leaked
     isLeak = true;
-  } else if (!searchResult.matchFound) {
+  } else {
     // If not found, protect it under this user
     await protectPHash(hash, user.id);
   }
