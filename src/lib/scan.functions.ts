@@ -26,30 +26,29 @@ export async function runScan(input: {
     fileSize: number;
     storagePath: string;
     file: File;
-    mode: "protect" | "check";
   };
 }): Promise<ScanResult & { assetId: string }> {
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) throw new Error("Not authenticated");
 
-  const { fileName, fileSize, storagePath, file, mode } = input.data;
+  const { fileName, fileSize, storagePath, file } = input.data;
 
   // Generate real pHash
   const hash = await generatePHash(file);
+
+  // Call Cloud Run API to check for matches
+  const searchResult = await searchPHash(hash);
   
   let isLeak = false;
   let status: "clean" | "leaked" = "clean";
 
-  if (mode === "protect") {
-    // In protect mode, we just register the asset (Generate DNA and Protect)
+  if (searchResult.match_found) {
+    // If ANY match is found, flag it as detected/leaked
+    isLeak = true;
+    status = "leaked";
+  } else {
+    // If not found, register it under this user
     await protectPHash(hash, user.id);
-  } else if (mode === "check") {
-    // In check mode, we only search for leaks
-    const searchResult = await searchPHash(hash);
-    if (searchResult.match_found) {
-      isLeak = true;
-      status = "leaked";
-    }
   }
 
   // Fallback / mock leak simulation for demonstration purposes

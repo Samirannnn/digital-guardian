@@ -86,7 +86,7 @@ function OverviewPage() {
     return () => clearInterval(t);
   }, [scanning]);
 
-  const handleFile = async (file: File, mode: "protect" | "check") => {
+  const handleFile = async (file: File) => {
     if (!user) return;
     const url = URL.createObjectURL(file);
     setImageUrl(url);
@@ -104,7 +104,6 @@ function OverviewPage() {
           fileSize: file.size,
           storagePath,
           file,
-          mode,
         },
       });
 
@@ -127,11 +126,7 @@ function OverviewPage() {
             { duration: 6000 },
           );
         } else {
-          toast.success(
-            mode === "protect"
-              ? "Asset registered — no leaks found"
-              : "No matches found — asset is clean"
-          );
+          toast.success("Asset registered — no leaks found");
         }
       }, 250);
     } catch (err) {
@@ -236,18 +231,9 @@ function OverviewPage() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="grid grid-cols-1 md:grid-cols-2 gap-4"
               >
                 <UploadZone
-                  mode="protect"
-                  onFile={(file) => handleFile(file, "protect")}
-                  scanning={scanning}
-                  progress={progress}
-                  stage={stage}
-                />
-                <UploadZone
-                  mode="check"
-                  onFile={(file) => handleFile(file, "check")}
+                  onFile={handleFile}
                   scanning={scanning}
                   progress={progress}
                   stage={stage}
