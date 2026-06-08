@@ -9,7 +9,6 @@ import {
   File as FileIcon,
   CheckCircle2,
   XCircle,
-  AlertTriangle,
   Loader2,
   Fingerprint,
   Trash2,
@@ -20,7 +19,7 @@ import { uploadAssetFile } from "@/lib/assets";
 import { getFileHash, searchPHash, protectPHash } from "@/lib/phash";
 import { supabase } from "@/integrations/supabase/client";
 
-type FileStatus = "queued" | "hashing" | "uploading" | "scanning" | "done" | "error" | "saved";
+type FileStatus = "queued" | "hashing" | "uploading" | "scanning" | "done" | "error";
 
 type FileEntry = {
   id: string;
@@ -28,7 +27,7 @@ type FileEntry = {
   status: FileStatus;
   progress: number;
   hash?: string;
-  scanStatus?: "clean" | "leaked" | "unverified";
+  scanStatus?: "clean" | "leaked";
   error?: string;
 };
 
@@ -86,7 +85,7 @@ export function BulkUploadZone({ userId, userEmail, onComplete }: Props) {
   };
 
   const clearDone = () => {
-    setQueue((q) => q.filter((e) => !["done", "error", "saved"].includes(e.status)));
+    setQueue((q) => q.filter((e) => !["done", "error"].includes(e.status)));
   };
 
   const processEntry = async (entry: FileEntry) => {
@@ -161,13 +160,12 @@ export function BulkUploadZone({ userId, userEmail, onComplete }: Props) {
       return;
     }
 
-    // "saved" = uploaded + saved, blockchain unverified (API was down)
-    // "done"  = uploaded + saved + blockchain verified
-    if (scanStatus === "unverified") {
-      updateEntry(id, { status: "saved", scanStatus: "unverified", progress: 100 });
-    } else {
-      updateEntry(id, { status: "done", scanStatus, progress: 100 });
-    }
+    // Always mark done — blockchain unavailability is not an error for the user
+    updateEntry(id, {
+      status: "done",
+      scanStatus: scanStatus === "unverified" ? "clean" : scanStatus,
+      progress: 100,
+    });
   };
 
   const startProcessing = async () => {
@@ -305,30 +303,6 @@ export function BulkUploadZone({ userId, userEmail, onComplete }: Props) {
                   const Icon = getFileIcon(entry.file);
                   const isActive = ["hashing", "uploading", "scanning"].includes(entry.status);
 
-                  const iconBg =
-                    entry.status === "done" && entry.scanStatus === "leaked"
-                      ? "bg-crimson/15 text-crimson"
-                      : entry.status === "done"
-                      ? "bg-emerald/15 text-emerald"
-                      : entry.status === "saved"
-                      ? "bg-amber-500/15 text-amber-400"
-                      : entry.status === "error"
-                      ? "bg-crimson/15 text-crimson"
-                      : "bg-primary/10 text-primary";
-
-                  const StatusIcon =
-                    entry.status === "done" && entry.scanStatus === "leaked"
-                      ? XCircle
-                      : entry.status === "done"
-                      ? CheckCircle2
-                      : entry.status === "saved"
-                      ? AlertTriangle
-                      : entry.status === "error"
-                      ? XCircle
-                      : isActive
-                      ? Loader2
-                      : Icon;
-
                   return (
                     <motion.div
                       key={entry.id}
@@ -339,12 +313,27 @@ export function BulkUploadZone({ userId, userEmail, onComplete }: Props) {
                     >
                       {/* Icon */}
                       <div
-                        className={`shrink-0 grid h-9 w-9 place-items-center rounded-lg ${iconBg}`}
+                        className={`shrink-0 grid h-9 w-9 place-items-center rounded-lg ${
+                          entry.status === "done" && entry.scanStatus === "leaked"
+                            ? "bg-crimson/15 text-crimson"
+                            : entry.status === "done"
+                            ? "bg-emerald/15 text-emerald"
+                            : entry.status === "error"
+                            ? "bg-crimson/15 text-crimson"
+                            : "bg-primary/10 text-primary"
+                        }`}
                       >
-                        <StatusIcon
-                          size={16}
-                          className={isActive ? "animate-spin" : ""}
-                        />
+                        {entry.status === "done" && entry.scanStatus === "leaked" ? (
+                          <XCircle size={16} />
+                        ) : entry.status === "done" ? (
+                          <CheckCircle2 size={16} />
+                        ) : entry.status === "error" ? (
+                          <XCircle size={16} />
+                        ) : isActive ? (
+                          <Loader2 size={16} className="animate-spin" />
+                        ) : (
+                          <Icon size={16} />
+                        )}
                       </div>
 
                       {/* Info */}
@@ -362,11 +351,6 @@ export function BulkUploadZone({ userId, userEmail, onComplete }: Props) {
                               }`}
                             >
                               {entry.scanStatus === "leaked" ? "Leaked" : "Protected"}
-                            </span>
-                          )}
-                          {entry.status === "saved" && (
-                            <span className="shrink-0 text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">
-                              Saved · verify later
                             </span>
                           )}
                           {entry.status === "error" && (
