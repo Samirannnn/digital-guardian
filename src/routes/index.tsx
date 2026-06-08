@@ -125,12 +125,16 @@ function OverviewPage() {
         };
         setResult(scanResult);
         refresh();
+        // Check if blockchain was unreachable
+        const blockchainDown = (r as any)._blockchainUnavailable;
         if (r.status === "leaked") {
           setLeakAlert({ fileName: file.name, result: scanResult });
           toast.error(
             `🚨 Leak detected in ${r.locations.length} location${r.locations.length > 1 ? "s" : ""}`,
             { duration: 6000 },
           );
+        } else if (blockchainDown) {
+          toast.warning("Asset saved — blockchain verification pending (API waking up)", { duration: 5000 });
         } else {
           toast.success("Asset registered — no leaks found");
         }

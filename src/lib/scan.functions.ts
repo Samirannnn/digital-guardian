@@ -4,12 +4,11 @@ import { getFileHash, searchPHash, protectPHash, getEnforcement } from "./phash"
 
 /**
  * Client-side scan pipeline:
- *  1. Generate pHash (identical to Android PHashGenerator)
- *  2. POST /search  — check blockchain for existing match
- *  3a. If MATCH FOUND → asset is LEAKED (someone else registered it already)
- *  3b. If NO MATCH   → POST /protect to register this user as owner
- *  4. Check /enforcement — if owner flagged blur, mark enforced
- *  5. Persist asset + leak_locations to Supabase
+ *  1. Generate hash (pHash for images, SHA-256 for everything else)
+ *  2. POST /search  — check blockchain for existing match (non-fatal if API is down)
+ *  3a. If MATCH FOUND → asset is LEAKED
+ *  3b. If NO MATCH   → POST /protect to register as owner (non-fatal)
+ *  4. Persist asset + leak_locations to Supabase regardless of blockchain result
  */
 export async function runScan(input: {
   data: {
@@ -29,33 +28,40 @@ export async function runScan(input: {
   const ownerEmail = user.email || user.id;
 
   // ── Step 1: Generate hash (pHash for images, SHA-256 for everything else) ─
-  const { hash, method: hashMethod } = await getFileHash(file);
+  const { hash } = await getFileHash(file);
 
-  // ── Step 2: Search blockchain ─────────────────────────────────────────────
-  const searchResult = await searchPHash(hash);
-
+  // ── Step 2: Search blockchain (non-fatal) ─────────────────────────────────
   let status: "clean" | "leaked" = "clean";
-  let leakOwner = "";
   let leakSim = 0;
+  let blockchainAvailable = false;
 
-  if (searchResult.match_found) {
-    // Hash already registered by someone else → LEAKED
-    status = "leaked";
-    leakOwner = searchResult.user_id;
-    leakSim = searchResult.sim;
-  } else {
-    // New file — register this user as the authorized owner
-    try {
-      await protectPHash(hash, ownerEmail);
-    } catch (protectErr) {
-      // Non-fatal: if protect fails after search succeeded, we still save to DB as clean
-      console.warn("protectPHash failed (non-fatal):", protectErr);
+  try {
+    const searchResult = await searchPHash(hash);
+    blockchainAvailable = true;
+
+    if (searchResult.match_found) {
+      status = "leaked";
+      leakSim = searchResult.sim;
+    } else {
+      // New asset — register ownership (non-fatal)
+      try {
+        await protectPHash(hash, ownerEmail);
+      } catch {
+        console.warn("protectPHash failed (non-fatal) — asset will still be saved");
+      }
     }
+  } catch {
+    // API is cold-starting or down — save as clean, blockchain unverified
+    console.warn("Blockchain API unavailable — saving asset without verification");
+    blockchainAvailable = false;
   }
 
-  // ── Step 3: Check enforcement status ─────────────────────────────────────
-  const enforcement = await getEnforcement(hash);
-  const isEnforced = enforcement.isEnforced;
+  // ── Step 3: Check enforcement status (non-fatal) ──────────────────────────
+  try {
+    await getEnforcement(hash);
+  } catch {
+    // non-fatal
+  }
 
   // ── Step 4: Build block metadata ─────────────────────────────────────────
   const blockNumber = 18_452_193 + Math.floor(Math.random() * 9999);
@@ -81,13 +87,10 @@ export async function runScan(input: {
     throw new Error(`Failed to save asset: ${aErr?.message ?? "unknown"}`);
   }
 
-  // ── Step 6: If leaked, build leak location from API response ─────────────
+  // ── Step 6: If leaked, persist leak location ──────────────────────────────
   let locations: LeakLocation[] = [];
 
   if (status === "leaked") {
-    // Real leak: we know the owner who registered it and the similarity
-    // The API returns the user_id (email) of the first uploader
-    // We create one location entry representing the detected leak source
     const leakLocation: LeakLocation = {
       city: "Unknown",
       country: "",
@@ -101,7 +104,6 @@ export async function runScan(input: {
 
     locations = [leakLocation];
 
-    // Persist leak_location row
     await supabase.from("leak_locations").insert({
       asset_id: asset.id,
       user_id: user.id,
@@ -122,5 +124,7 @@ export async function runScan(input: {
     scannedAt,
     blockNumber,
     locations,
-  };
+    // Pass along whether blockchain was reachable so UI can show a warning
+    ...(blockchainAvailable ? {} : { _blockchainUnavailable: true }),
+  } as ScanResult & { assetId: string };
 }
