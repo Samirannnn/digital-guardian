@@ -234,12 +234,26 @@ function VaultPage() {
                   key={req.id}
                   className="glass rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-l-4 border-l-primary bg-black/30"
                 >
-                  <div>
-                    <div className="text-xs font-semibold">
-                      Accept ownership of "{req.assets?.name ?? "Asset"}"?
-                    </div>
-                    <div className="text-[10px] text-muted-foreground mt-0.5 font-mono">
-                      Hash: {req.assets?.hash.slice(0, 16)}…
+                  <div className="flex gap-3 items-center min-w-0">
+                    {/* Preview box */}
+                    {req.signedUrl && (
+                      <div className="shrink-0 h-12 w-12 rounded-lg overflow-hidden bg-black/40 border border-border relative">
+                        {req.assets?.name && ["jpg", "jpeg", "png", "webp", "gif", "svg"].includes(req.assets.name.split(".").pop()?.toLowerCase() || "") ? (
+                          <img src={req.signedUrl} alt="Preview" className="h-full w-full object-cover" />
+                        ) : (
+                          <div className="h-full w-full grid place-items-center text-[9px] text-muted-foreground uppercase font-mono bg-gradient-to-br from-primary/10 to-cyber/10">
+                            {req.assets?.name.split(".").pop()?.slice(0, 3) ?? "file"}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold truncate">
+                        Accept ownership of "{req.assets?.name ?? "Asset"}"?
+                      </div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5 font-mono truncate">
+                        Hash: {req.assets?.hash.slice(0, 16)}…
+                      </div>
                     </div>
                   </div>
                   <div className="flex gap-2 shrink-0">
@@ -279,6 +293,7 @@ function VaultPage() {
               imageUrl={selectedAsset.signedUrl ?? ""}
               result={toScanResult(selectedAsset)}
               ownerEmail={selectedAsset.app_email}
+              fileName={selectedAsset.name}
               onClose={() => setSelectedAsset(null)}
             />
           </AnimatePresence>

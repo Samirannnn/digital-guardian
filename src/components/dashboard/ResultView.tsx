@@ -7,11 +7,23 @@ type Props = {
   imageUrl: string;
   result: ScanResult;
   ownerEmail?: string | null;
+  fileName?: string;
   onClose: () => void;
 };
 
-export function ResultView({ imageUrl, result, ownerEmail, onClose }: Props) {
+function getFileType(fileName: string) {
+  const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
+  if (["jpg", "jpeg", "png", "webp", "gif", "svg"].includes(ext)) return "image";
+  if (["mp4", "webm", "ogg", "mov"].includes(ext)) return "video";
+  if (["mp3", "wav", "ogg", "m4a", "aac"].includes(ext)) return "audio";
+  if (ext === "pdf") return "pdf";
+  return "other";
+}
+
+export function ResultView({ imageUrl, result, ownerEmail, fileName, onClose }: Props) {
   const leaked = result.status === "leaked";
+  const fileType = fileName ? getFileType(fileName) : "image";
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 16 }}
@@ -25,8 +37,8 @@ export function ResultView({ imageUrl, result, ownerEmail, onClose }: Props) {
           <div className="flex items-center justify-between px-4 py-3 border-b border-border">
             <div className="flex items-center gap-2">
               <Hash size={14} className="text-primary" />
-              <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                Signature Generated
+              <span className="text-[11px] uppercase tracking-wider text-muted-foreground truncate max-w-xs">
+                {fileName || "Signature Generated"}
               </span>
             </div>
             <button
@@ -38,10 +50,37 @@ export function ResultView({ imageUrl, result, ownerEmail, onClose }: Props) {
           </div>
 
           <div className="relative aspect-[4/3] bg-black/40">
-            <img src={imageUrl} alt="Scanned asset" className="absolute inset-0 h-full w-full object-cover" />
+            {fileType === "image" && (
+              <img src={imageUrl} alt={fileName || "Asset"} className="absolute inset-0 h-full w-full object-cover" />
+            )}
+            {fileType === "video" && (
+              <video src={imageUrl} controls className="absolute inset-0 h-full w-full object-contain bg-black" />
+            )}
+            {fileType === "audio" && (
+              <div className="absolute inset-0 grid place-items-center bg-black/60 p-4">
+                <audio src={imageUrl} controls className="w-full" />
+              </div>
+            )}
+            {fileType === "pdf" && (
+              <iframe src={imageUrl} className="absolute inset-0 h-full w-full border-none bg-white" />
+            )}
+            {fileType === "other" && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 p-4 text-center">
+                <span className="text-xs font-semibold mb-2">No preview available for this file type</span>
+                <a
+                  href={imageUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-[10px] font-semibold hover:opacity-90 transition-opacity"
+                >
+                  Download / View File
+                </a>
+              </div>
+            )}
+
             {/* hex overlay */}
-            <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
-            <div className="absolute inset-x-0 bottom-0 p-4 font-mono text-[10px] leading-relaxed text-primary/90">
+            <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent pointer-events-none" />
+            <div className="absolute inset-x-0 bottom-0 p-4 font-mono text-[10px] leading-relaxed text-primary/90 pointer-events-none">
               <div className="text-[9px] uppercase tracking-[0.2em] text-primary/70 mb-1.5">
                 pHash · 256 bit
               </div>
@@ -51,18 +90,26 @@ export function ResultView({ imageUrl, result, ownerEmail, onClose }: Props) {
             </div>
             {/* scanning grid corners */}
             {["top-3 left-3 border-l-2 border-t-2", "top-3 right-3 border-r-2 border-t-2", "bottom-3 left-3 border-l-2 border-b-2", "bottom-3 right-3 border-r-2 border-b-2"].map((c) => (
-              <div key={c} className={`absolute h-5 w-5 border-primary ${c}`} />
+              <div key={c} className={`absolute h-5 w-5 border-primary ${c} pointer-events-none`} />
             ))}
           </div>
         </div>
 
         <div>
-          {ownerEmail && (
-            <div className="px-4 py-3 border-t border-border bg-black/20 flex items-center justify-between text-xs">
-              <span className="text-muted-foreground font-mono">Registered Owner:</span>
-              <span className="font-mono text-primary font-medium">{ownerEmail}</span>
+          <div className="px-4 py-2.5 border-t border-border bg-black/20 flex items-center justify-between text-xs">
+            <div className="flex flex-col">
+              <span className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider">Registered Owner</span>
+              <span className="font-mono text-primary font-medium mt-0.5">{ownerEmail || "Unknown"}</span>
             </div>
-          )}
+            <a
+              href={imageUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-2.5 py-1 rounded-md border border-border hover:bg-white/5 transition-colors text-[10px] font-semibold"
+            >
+              Open Original
+            </a>
+          </div>
 
           <div className="grid grid-cols-3 gap-px bg-border border-t border-border">
             <Stat label="Block #" value={`#${result.blockNumber.toLocaleString()}`} />

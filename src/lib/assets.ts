@@ -325,7 +325,9 @@ export type TransferRequestWithAsset = {
   assets: {
     name: string;
     hash: string;
+    storage_path: string;
   } | null;
+  signedUrl?: string | null;
 };
 
 export async function fetchPendingTransfers(userId: string): Promise<TransferRequestWithAsset[]> {
@@ -341,7 +343,8 @@ export async function fetchPendingTransfers(userId: string): Promise<TransferReq
       created_at,
       assets (
         name,
-        hash
+        hash,
+        storage_path
       )
     `)
     .eq("recipient_id", userId)
@@ -349,7 +352,26 @@ export async function fetchPendingTransfers(userId: string): Promise<TransferReq
     .order("created_at", { ascending: false });
 
   if (error) throw error;
-  return (data as any) ?? [];
+  if (!data) return [];
+
+  // Generate signed URL previews in parallel
+  const signed = await Promise.all(
+    data.map(async (req: any) => {
+      let signedUrl = null;
+      if (req.assets?.storage_path) {
+        const { data: signData } = await supabase.storage
+          .from("assets")
+          .createSignedUrl(req.assets.storage_path, 3600);
+        signedUrl = signData?.signedUrl ?? null;
+      }
+      return {
+        ...req,
+        signedUrl,
+      };
+    })
+  );
+
+  return signed as any;
 }
 
 /**

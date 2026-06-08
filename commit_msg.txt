@@ -1,0 +1,6 @@
+feat: add photo previews in transfers, support multi-type asset views, and show owner email
+
+- Added signed URL generation inside fetchPendingTransfers to provide image preview URLs for pending requests.
+- Rendered thumbnail previews in the pending ownership transfers cards inside Vault.
+- Extended ResultView to determine file types and render appropriate viewer components (images, video, audio, PDFs, generic preview card).
+- Added a prominent "Open Original" button next to the registered owner's email address.
