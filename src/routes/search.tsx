@@ -16,21 +16,21 @@ import {
   XCircle,
   RotateCcw,
   Lock,
+  Copy,
 } from "lucide-react";
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
+import { WorldMap } from "@/components/dashboard/WorldMap";
 import { useAuth } from "@/lib/auth";
-import { getFileHash, searchPHash, protectPHash } from "@/lib/phash";
-import { uploadAssetFile } from "@/lib/assets";
+import { getFileHash } from "@/lib/phash";
+import { lookupHashInDB, uploadAssetFile } from "@/lib/assets";
 import { supabase } from "@/integrations/supabase/client";
+import type { HashLookupResult } from "@/lib/assets";
 
 export const Route = createFileRoute("/search")({
   head: () => ({
     meta: [
       { title: "Asset Search — Sentinel" },
-      {
-        name: "description",
-        content: "Check if any digital asset is already registered in the Sentinel database.",
-      },
+      { name: "description", content: "Check if any digital asset is already registered in the Sentinel database." },
       { property: "og:title", content: "Asset Search — Sentinel" },
     ],
   }),
@@ -39,24 +39,13 @@ export const Route = createFileRoute("/search")({
 
 type SearchState = "idle" | "hashing" | "searching" | "found" | "not_found";
 
-type SearchResult = {
-  match_found: boolean;
-  user_id: string;
-  sim: number;
-  hash: string;
-  method: "phash" | "sha256";
-  // Pulled from our own DB
-  deviceCount: number;
-  assetName?: string;
-};
-
-function maskOwner(uid: string): string {
-  if (!uid) return "Unknown";
-  if (uid.includes("@")) {
-    const [name, domain] = uid.split("@");
-    return `${name.slice(0, 2)}***@${domain}`;
+function maskEmail(email: string | null): string {
+  if (!email) return "Unknown";
+  if (email.includes("@")) {
+    const [name, domain] = email.split("@");
+    return `${name.slice(0, 2)}${"*".repeat(Math.max(2, name.length - 2))}@${domain}`;
   }
-  return `${uid.slice(0, 4)}****${uid.slice(-4)}`;
+  return `${email.slice(0, 4)}****${email.slice(-4)}`;
 }
 
 function SearchPage() {
@@ -68,8 +57,11 @@ function SearchPage() {
   const [state, setState] = useState<SearchState>("idle");
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
+  const [hash, setHash] = useState<string | null>(null);
+  const [hashMethod, setHashMethod] = useState<"phash" | "sha256">("phash");
+  const [searchResult, setSearchResult] = useState<HashLookupResult | null>(null);
   const [registering, setRegistering] = useState(false);
+  const [copiedHash, setCopiedHash] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !session) navigate({ to: "/auth" });
@@ -78,61 +70,25 @@ function SearchPage() {
   const handleFile = useCallback(async (f: File) => {
     setFile(f);
     setSearchResult(null);
+    setHash(null);
     setState("hashing");
 
-    // Preview for images
-    if (f.type.startsWith("image/")) {
-      setPreviewUrl(URL.createObjectURL(f));
-    } else {
-      setPreviewUrl(null);
-    }
+    if (f.type.startsWith("image/")) setPreviewUrl(URL.createObjectURL(f));
+    else setPreviewUrl(null);
 
     try {
       // Step 1: Fingerprint
-      const { hash, method } = await getFileHash(f);
+      const result = await getFileHash(f);
+      setHash(result.hash);
+      setHashMethod(result.method);
       setState("searching");
 
-      // Step 2: Search blockchain / API
-      const apiResult = await searchPHash(hash);
-
-      // Step 3: Check our own DB for device count
-      let deviceCount = 0;
-      let assetName: string | undefined;
-      if (apiResult.match_found) {
-        // Query leak_locations joined via assets by hash
-        const { data: assets } = await supabase
-          .from("assets")
-          .select("id, name")
-          .eq("hash", hash)
-          .limit(1);
-
-        if (assets && assets.length > 0) {
-          assetName = assets[0].name;
-          const { count } = await supabase
-            .from("leak_locations")
-            .select("id", { count: "exact", head: true })
-            .eq("asset_id", assets[0].id);
-          deviceCount = count ?? 0;
-        }
-      }
-
-      setSearchResult({
-        match_found: apiResult.match_found,
-        user_id: apiResult.user_id,
-        sim: apiResult.sim,
-        hash,
-        method,
-        deviceCount,
-        assetName,
-      });
-      setState(apiResult.match_found ? "found" : "not_found");
+      // Step 2: Query Supabase directly — reliable, no blockchain dependency
+      const dbResult = await lookupHashInDB(result.hash);
+      setSearchResult(dbResult);
+      setState(dbResult.found ? "found" : "not_found");
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "";
-      if (msg.includes("503") || msg.includes("unreachable") || msg.includes("timeout")) {
-        toast.error("⏳ Blockchain API is waking up — please wait 20 seconds and try again", { duration: 8000 });
-      } else {
-        toast.error("Search failed. Please try again.");
-      }
+      toast.error("Search failed. Please try again.");
       setState("idle");
     }
   }, []);
@@ -141,34 +97,42 @@ function SearchPage() {
     setFile(null);
     setPreviewUrl(null);
     setSearchResult(null);
+    setHash(null);
     setState("idle");
   };
 
   const handleRegister = async () => {
-    if (!user || !file || !searchResult) return;
+    if (!user || !file || !hash) return;
     setRegistering(true);
     try {
       const storagePath = await uploadAssetFile(user.id, file);
-      await protectPHash(searchResult.hash, user.email ?? user.id);
       const blockNumber = 18_452_193 + Math.floor(Math.random() * 9999);
-      const scannedAt = new Date().toISOString();
-      await supabase.from("assets").insert({
+      const { error } = await supabase.from("assets").insert({
         user_id: user.id,
         name: file.name,
         storage_path: storagePath,
         size: file.size,
-        hash: searchResult.hash,
+        hash,
         status: "clean",
         block_number: blockNumber,
-        scanned_at: scannedAt,
+        scanned_at: new Date().toISOString(),
+        owner_email: user.email ?? user.id,
       });
-      toast.success(`✅ "${file.name}" registered and protected on-chain`);
+      if (error) throw error;
+      toast.success(`✅ "${file.name}" registered — you are now the owner`);
       reset();
     } catch {
-      toast.error("Registration failed.");
+      toast.error("Registration failed. Please try again.");
     } finally {
       setRegistering(false);
     }
+  };
+
+  const copyHash = () => {
+    if (!hash) return;
+    navigator.clipboard.writeText(hash);
+    setCopiedHash(true);
+    setTimeout(() => setCopiedHash(false), 2000);
   };
 
   if (authLoading || !session) {
@@ -179,6 +143,9 @@ function SearchPage() {
     );
   }
 
+  const isCurrentUserOwner =
+    searchResult?.ownerUserId === user?.id || searchResult?.ownerEmail === user?.email;
+
   return (
     <DashboardLayout>
       <div className="space-y-6 max-w-3xl">
@@ -187,17 +154,15 @@ function SearchPage() {
           <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
             <Search size={12} /> Asset Search
           </div>
-          <h1 className="mt-1 text-2xl lg:text-3xl font-bold tracking-tight">
-            Check Any Asset
-          </h1>
+          <h1 className="mt-1 text-2xl lg:text-3xl font-bold tracking-tight">Check Any Asset</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Upload any digital file to check if it already exists in the Sentinel database — and see
-            how many devices have it.
+            Drop any file to check if it's already in the database. See who owns it and how many
+            devices have it.
           </p>
         </header>
 
-        {/* Drop Zone */}
         <AnimatePresence mode="wait">
+          {/* ── IDLE: Drop Zone ── */}
           {state === "idle" && (
             <motion.div
               key="dropzone"
@@ -215,8 +180,6 @@ function SearchPage() {
                 }`}
               >
                 <div className="absolute inset-0 grid-bg opacity-30" />
-                <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-primary/0 via-primary/5 to-cyber/10 pointer-events-none" />
-
                 <input
                   ref={inputRef}
                   type="file"
@@ -224,7 +187,6 @@ function SearchPage() {
                   className="hidden"
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }}
                 />
-
                 <div className="relative px-6 py-14 flex flex-col items-center text-center">
                   <div className="relative mb-5">
                     <div className="absolute inset-0 rounded-2xl bg-cyber/30 blur-2xl" />
@@ -236,7 +198,7 @@ function SearchPage() {
                     Drop a file to <span className="text-gradient-primary">search the database</span>
                   </h3>
                   <p className="mt-2 text-sm text-muted-foreground max-w-md">
-                    Accepts any file type. We'll compute a fingerprint and check the blockchain.
+                    Accepts any file type. Checked directly against the Sentinel database — instant results.
                   </p>
                   <div className="mt-5 flex flex-wrap justify-center gap-2 text-[11px] font-mono text-muted-foreground">
                     {["Images (pHash)", "PDF · Docs (SHA-256)", "Audio", "Archives"].map((t) => (
@@ -248,7 +210,7 @@ function SearchPage() {
             </motion.div>
           )}
 
-          {/* Hashing / Searching state */}
+          {/* ── SEARCHING ── */}
           {(state === "hashing" || state === "searching") && (
             <motion.div
               key="searching"
@@ -266,25 +228,19 @@ function SearchPage() {
                 </div>
               </div>
               <p className="text-sm font-semibold">
-                {state === "hashing" ? "Computing fingerprint…" : "Searching blockchain database…"}
+                {state === "hashing" ? "Computing fingerprint…" : "Searching database…"}
               </p>
-              <p className="mt-1 text-xs font-mono text-muted-foreground">
-                {file?.name}
-              </p>
+              <p className="mt-1 text-xs font-mono text-muted-foreground truncate max-w-xs">{file?.name}</p>
               <div className="mt-4 flex gap-1">
                 {[0, 1, 2].map((i) => (
-                  <div
-                    key={i}
-                    className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce"
-                    style={{ animationDelay: `${i * 0.15}s` }}
-                  />
+                  <div key={i} className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
                 ))}
               </div>
             </motion.div>
           )}
 
-          {/* Result */}
-          {(state === "found" || state === "not_found") && searchResult && (
+          {/* ── RESULT ── */}
+          {(state === "found" || state === "not_found") && searchResult !== null && (
             <motion.div
               key="result"
               initial={{ opacity: 0, y: 12 }}
@@ -292,67 +248,56 @@ function SearchPage() {
               exit={{ opacity: 0 }}
               className="space-y-4"
             >
-              {/* Result card */}
+              {/* Status header */}
               <div className="glass rounded-2xl overflow-hidden">
-                {/* Status header */}
-                <div
-                  className={`px-5 py-4 border-b border-border flex items-center gap-3 ${
-                    state === "found" ? "bg-crimson/10" : "bg-emerald/10"
-                  }`}
-                >
-                  {state === "found" ? (
-                    <div className="grid h-10 w-10 place-items-center rounded-xl bg-crimson/20 text-crimson shrink-0">
-                      <ShieldAlert size={20} />
-                    </div>
-                  ) : (
-                    <div className="grid h-10 w-10 place-items-center rounded-xl bg-emerald/20 text-emerald shrink-0">
-                      <ShieldCheck size={20} />
-                    </div>
-                  )}
+                <div className={`px-5 py-4 border-b border-border flex items-center gap-3 ${state === "found" ? "bg-crimson/10" : "bg-emerald/10"}`}>
+                  <div className={`grid h-10 w-10 place-items-center rounded-xl shrink-0 ${state === "found" ? "bg-crimson/20 text-crimson" : "bg-emerald/20 text-emerald"}`}>
+                    {state === "found" ? <ShieldAlert size={20} /> : <ShieldCheck size={20} />}
+                  </div>
                   <div className="flex-1">
                     <div className={`text-base font-bold ${state === "found" ? "text-crimson" : "text-emerald"}`}>
                       {state === "found" ? "Asset Found in Database" : "Asset Not Found"}
                     </div>
                     <div className="text-xs text-muted-foreground mt-0.5">
                       {state === "found"
-                        ? "This file is already registered on-chain."
-                        : "This file has not been registered yet. You can register it below."}
+                        ? `Registered by ${maskEmail(searchResult.ownerEmail)} · uploaded ${searchResult.uploadCount} time${searchResult.uploadCount !== 1 ? "s" : ""}`
+                        : "This file has not been registered yet."}
                     </div>
                   </div>
                   <button
                     onClick={reset}
-                    className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground border border-border hover:border-border/60 transition-colors"
+                    className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground border border-border transition-colors"
                   >
                     <RotateCcw size={11} /> New Search
                   </button>
                 </div>
 
                 <div className="grid sm:grid-cols-2 gap-0">
-                  {/* Left: file info + fingerprint */}
+                  {/* Left: file + fingerprint */}
                   <div className="p-5 border-b sm:border-b-0 sm:border-r border-border space-y-4">
                     {previewUrl && (
-                      <div className="relative aspect-[4/3] rounded-xl overflow-hidden bg-black/40 mb-3">
+                      <div className="relative aspect-[4/3] rounded-xl overflow-hidden bg-black/40">
                         <img src={previewUrl} alt={file?.name} className="h-full w-full object-cover" />
                         <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
-                        {/* scan corners */}
-                        {["top-2 left-2 border-l-2 border-t-2", "top-2 right-2 border-r-2 border-t-2",
-                          "bottom-2 left-2 border-l-2 border-b-2", "bottom-2 right-2 border-r-2 border-b-2"].map((c) => (
+                        {["top-2 left-2 border-l-2 border-t-2", "top-2 right-2 border-r-2 border-t-2", "bottom-2 left-2 border-l-2 border-b-2", "bottom-2 right-2 border-r-2 border-b-2"].map((c) => (
                           <div key={c} className={`absolute h-4 w-4 border-primary/70 ${c}`} />
                         ))}
                       </div>
                     )}
-
                     <div>
                       <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">File</div>
                       <div className="text-sm font-medium truncate">{file?.name}</div>
                     </div>
-
                     <div>
-                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1">
-                        <Hash size={10} /> Fingerprint ({searchResult.method === "phash" ? "pHash" : "SHA-256"})
+                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center justify-between">
+                        <span className="flex items-center gap-1"><Hash size={10} /> Fingerprint ({hashMethod === "phash" ? "pHash" : "SHA-256"})</span>
+                        <button onClick={copyHash} className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors">
+                          <Copy size={10} />
+                          {copiedHash ? "Copied!" : "Copy"}
+                        </button>
                       </div>
                       <div className="font-mono text-[11px] text-primary/90 break-all leading-relaxed bg-black/30 rounded-lg px-3 py-2">
-                        {searchResult.hash.match(/.{1,8}/g)?.join(" ")}
+                        {hash?.match(/.{1,8}/g)?.join(" ")}
                       </div>
                     </div>
                   </div>
@@ -361,87 +306,102 @@ function SearchPage() {
                   <div className="p-5 space-y-4">
                     {state === "found" ? (
                       <>
-                        <div>
-                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Match Confidence</div>
-                          <div className="flex items-center gap-3">
-                            <div className="flex-1 h-2 rounded-full bg-white/5 overflow-hidden border border-border">
-                              <div
-                                className="h-full bg-gradient-to-r from-crimson to-primary"
-                                style={{ width: `${Math.round(searchResult.sim * 100)}%` }}
-                              />
-                            </div>
-                            <span className="text-sm font-bold text-crimson font-mono">
-                              {Math.round(searchResult.sim * 100)}%
-                            </span>
-                          </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <InfoTile icon={Users} label="Total Uploads" value={String(searchResult.uploadCount)} accent={searchResult.uploadCount > 1 ? "crimson" : "emerald"} />
+                          <InfoTile icon={MapPin} label="Detections" value={String(searchResult.deviceCount || searchResult.uploadCount)} accent={searchResult.deviceCount > 0 ? "crimson" : "primary"} />
                         </div>
 
                         <div>
                           <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1 flex items-center gap-1">
                             <Lock size={10} /> Registered Owner
                           </div>
-                          <div className="text-sm font-mono bg-black/30 rounded-lg px-3 py-2">
-                            {maskOwner(searchResult.user_id)}
+                          <div className="text-sm font-mono bg-black/30 rounded-lg px-3 py-2 flex items-center justify-between">
+                            <span>{maskEmail(searchResult.ownerEmail)}</span>
+                            {isCurrentUserOwner && (
+                              <span className="text-[10px] bg-emerald/20 text-emerald px-1.5 py-0.5 rounded font-sans">You</span>
+                            )}
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-3">
-                          <InfoTile
-                            icon={Users}
-                            label="Devices"
-                            value={String(searchResult.deviceCount || "—")}
-                            accent="crimson"
-                          />
-                          <InfoTile
-                            icon={MapPin}
-                            label="Locations"
-                            value={String(searchResult.deviceCount || "—")}
-                            accent="crimson"
-                          />
-                        </div>
-
-                        {searchResult.assetName && (
-                          <div>
-                            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Known As</div>
-                            <div className="text-sm font-mono truncate text-muted-foreground">{searchResult.assetName}</div>
+                        {isCurrentUserOwner ? (
+                          <div className="flex items-start gap-2 rounded-xl bg-emerald/10 border border-emerald/20 px-3 py-2.5 text-xs text-emerald">
+                            <CheckCircle2 size={14} className="shrink-0 mt-0.5" />
+                            <span>You are the registered owner of this asset.</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-start gap-2 rounded-xl bg-crimson/10 border border-crimson/20 px-3 py-2.5 text-xs text-crimson">
+                            <XCircle size={14} className="shrink-0 mt-0.5" />
+                            <span>This asset is already registered. You are not the owner.</span>
                           </div>
                         )}
-
-                        <div className="flex items-start gap-2 rounded-xl bg-crimson/10 border border-crimson/20 px-3 py-2.5 text-xs text-crimson">
-                          <XCircle size={14} className="shrink-0 mt-0.5" />
-                          <span>This asset is already registered. You are not the owner.</span>
-                        </div>
                       </>
                     ) : (
                       <>
                         <div className="flex items-start gap-2 rounded-xl bg-emerald/10 border border-emerald/20 px-3 py-2.5 text-xs text-emerald">
                           <CheckCircle2 size={14} className="shrink-0 mt-0.5" />
-                          <span>No match found. This asset is not in the database — you can register it as the owner.</span>
+                          <span>No match found. Register it now to become the owner.</span>
                         </div>
-
                         <div>
-                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Algorithm Used</div>
+                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Algorithm</div>
                           <div className="text-sm font-mono text-muted-foreground">
-                            {searchResult.method === "phash" ? "Perceptual Hash (pHash-64)" : "SHA-256 (exact match)"}
+                            {hashMethod === "phash" ? "Perceptual Hash (pHash-64)" : "SHA-256 (exact match)"}
                           </div>
                         </div>
-
                         <button
                           onClick={handleRegister}
                           disabled={registering}
                           className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold bg-gradient-to-r from-primary to-cyber text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50"
                         >
-                          {registering ? (
-                            <Loader2 size={15} className="animate-spin" />
-                          ) : (
-                            <UploadCloud size={15} />
-                          )}
-                          {registering ? "Registering…" : "Register & Protect This Asset"}
+                          {registering ? <Loader2 size={15} className="animate-spin" /> : <UploadCloud size={15} />}
+                          {registering ? "Registering…" : "Register & Become Owner"}
                         </button>
                       </>
                     )}
                   </div>
                 </div>
+
+                {/* Map — shown when locations exist */}
+                {state === "found" && searchResult.locations.length > 0 && (
+                  <div className="border-t border-border">
+                    <div className="px-5 py-3 flex items-center gap-2">
+                      <MapPin size={13} className="text-crimson" />
+                      <span className="text-xs font-semibold">
+                        Detection Map — {searchResult.locations.length} location{searchResult.locations.length !== 1 ? "s" : ""}
+                      </span>
+                    </div>
+                    <div className="px-4 pb-4">
+                      <WorldMap pins={searchResult.locations} compact />
+                    </div>
+
+                    {/* Location list */}
+                    <div className="border-t border-border divide-y divide-border max-h-56 overflow-auto">
+                      {searchResult.locations.map((loc, i) => (
+                        <div key={i} className="flex items-center gap-3 px-5 py-3 hover:bg-white/[0.02]">
+                          <div className="grid h-8 w-8 place-items-center rounded-lg bg-crimson/15 text-crimson shrink-0">
+                            <MapPin size={13} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium">{loc.city || "Unknown location"}</div>
+                            <div className="text-[11px] font-mono text-muted-foreground mt-0.5">
+                              {loc.device} · {loc.app}
+                            </div>
+                          </div>
+                          <span className="shrink-0 text-[10px] font-mono bg-crimson/15 text-crimson px-1.5 py-0.5 rounded">
+                            {loc.confidence}% match
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* No locations but found — show upload count info */}
+                {state === "found" && searchResult.locations.length === 0 && (
+                  <div className="border-t border-border px-5 py-4 flex items-center gap-2 text-xs text-muted-foreground">
+                    <MapPin size={12} />
+                    <span>No device locations recorded yet for this asset.</span>
+                  </div>
+                )}
               </div>
             </motion.div>
           )}
@@ -451,12 +411,7 @@ function SearchPage() {
   );
 }
 
-function InfoTile({
-  icon: Icon,
-  label,
-  value,
-  accent,
-}: {
+function InfoTile({ icon: Icon, label, value, accent }: {
   icon: React.ElementType;
   label: string;
   value: string;

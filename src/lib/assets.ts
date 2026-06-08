@@ -14,6 +14,7 @@ export type DbAsset = {
   block_number: number | null;
   scanned_at: string;
   created_at: string;
+  owner_email?: string | null;
 };
 
 export type AssetWithLocations = DbAsset & {
@@ -119,7 +120,7 @@ export function useAssetsRealtime() {
   }, [user?.id, qc]);
 }
 
-// Tiny helper to upload a File to the user's folder in the assets bucket
+// Upload a File to the user's folder in the assets bucket
 export async function uploadAssetFile(userId: string, file: File): Promise<string> {
   const ext = file.name.split(".").pop() ?? "bin";
   const path = `${userId}/${crypto.randomUUID()}.${ext}`;
@@ -134,7 +135,6 @@ export async function uploadAssetFile(userId: string, file: File): Promise<strin
 
 /**
  * Bulk-upload multiple files with a concurrency cap of 3.
- * Calls onProgress(fileName, storagePath | Error) after each file settles.
  */
 export async function bulkUploadAssets(
   userId: string,
@@ -159,15 +159,102 @@ export async function bulkUploadAssets(
   await Promise.all(Array.from({ length: CONCURRENCY }, worker));
 }
 
+// ─── Hash-based lookup helpers ────────────────────────────────────────────────
+
+export type HashLookupResult = {
+  found: boolean;
+  ownerEmail: string | null;
+  ownerUserId: string | null;
+  assetId: string | null;
+  assetName: string | null;
+  uploadCount: number;        // how many times this hash appears in the DB
+  deviceCount: number;        // entries in leak_locations for this hash
+  locations: LeakLocation[];  // for the map
+};
+
+/**
+ * Search Supabase for an asset by hash.
+ * Returns owner info, how many times it's been uploaded, and all device locations.
+ */
+export async function lookupHashInDB(hash: string): Promise<HashLookupResult> {
+  // Find all assets with this hash (across all users)
+  const { data: assets, error } = await supabase
+    .from("assets")
+    .select("id, name, user_id, owner_email, created_at")
+    .eq("hash", hash)
+    .order("created_at", { ascending: true }); // oldest first = original owner
+
+  if (error) throw error;
+
+  if (!assets || assets.length === 0) {
+    return {
+      found: false,
+      ownerEmail: null,
+      ownerUserId: null,
+      assetId: null,
+      assetName: null,
+      uploadCount: 0,
+      deviceCount: 0,
+      locations: [],
+    };
+  }
+
+  // The first-ever upload is the owner
+  const original = assets[0];
+  const allIds = assets.map((a) => a.id);
+
+  // Get all leak_locations for all assets with this hash
+  const { data: locs } = await supabase
+    .from("leak_locations")
+    .select("*")
+    .in("asset_id", allIds);
+
+  const locations: LeakLocation[] = (locs ?? []).map((l) => ({
+    city: l.city,
+    country: "",
+    lat: l.lat,
+    lng: l.lon,
+    device: l.device,
+    app: l.app,
+    confidence: l.confidence,
+    timestamp: l.detected_at,
+  }));
+
+  return {
+    found: true,
+    ownerEmail: original.owner_email ?? null,
+    ownerUserId: original.user_id,
+    assetId: original.id,
+    assetName: original.name,
+    uploadCount: assets.length,
+    deviceCount: locs?.length ?? 0,
+    locations,
+  };
+}
+
+/**
+ * Transfer ownership of an asset: update owner_email on the DB row.
+ * Only the current owner (matched by user_id) can do this.
+ */
+export async function transferOwnershipDB(
+  assetId: string,
+  newOwnerEmail: string,
+): Promise<{ success: boolean; message?: string }> {
+  const { error } = await supabase
+    .from("assets")
+    .update({ owner_email: newOwnerEmail })
+    .eq("id", assetId);
+
+  if (error) return { success: false, message: error.message };
+  return { success: true };
+}
+
 // Delete an asset from database and storage
 export async function deleteAsset(id: string, storagePath: string) {
-  // 1. Remove from storage
   if (storagePath) {
     const { error: storageError } = await supabase.storage.from("assets").remove([storagePath]);
     if (storageError) console.error("Failed to delete storage file:", storageError);
   }
-
-  // 2. Remove from DB (delete locations first in case no cascade)
   await supabase.from("leak_locations").delete().eq("asset_id", id);
   const { error } = await supabase.from("assets").delete().eq("id", id);
   if (error) throw error;

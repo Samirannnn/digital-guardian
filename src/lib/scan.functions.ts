@@ -1,14 +1,15 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { LeakLocation, ScanResult } from "./dna";
-import { getFileHash, searchPHash, protectPHash, getEnforcement } from "./phash";
+import { getFileHash } from "./phash";
+import { lookupHashInDB } from "./assets";
 
 /**
- * Client-side scan pipeline:
+ * Client-side scan pipeline (Supabase-first, blockchain optional):
  *  1. Generate hash (pHash for images, SHA-256 for everything else)
- *  2. POST /search  — check blockchain for existing match (non-fatal if API is down)
- *  3a. If MATCH FOUND → asset is LEAKED
- *  3b. If NO MATCH   → POST /protect to register as owner (non-fatal)
- *  4. Persist asset + leak_locations to Supabase regardless of blockchain result
+ *  2. Query Supabase — does this hash already exist?
+ *     a. EXISTS   → asset was already uploaded by someone → mark leaked, record location
+ *     b. NOT EXISTS → new asset → save as owner (status = clean)
+ *  3. Persist to Supabase
  */
 export async function runScan(input: {
   data: {
@@ -25,49 +26,20 @@ export async function runScan(input: {
   if (authError || !user) throw new Error("Not authenticated");
 
   const { fileName, fileSize, storagePath, file } = input.data;
-  const ownerEmail = user.email || user.id;
+  const ownerEmail = user.email ?? user.id;
 
-  // ── Step 1: Generate hash (pHash for images, SHA-256 for everything else) ─
+  // ── Step 1: Generate hash ─────────────────────────────────────────────────
   const { hash } = await getFileHash(file);
 
-  // ── Step 2: Search blockchain (non-fatal) ─────────────────────────────────
+  // ── Step 2: Check Supabase for existing hash ──────────────────────────────
+  const existing = await lookupHashInDB(hash);
+
   let status: "clean" | "leaked" = "clean";
-  let leakSim = 0;
-  let blockchainAvailable = false;
-
-  try {
-    const searchResult = await searchPHash(hash);
-    blockchainAvailable = true;
-
-    if (searchResult.match_found) {
-      status = "leaked";
-      leakSim = searchResult.sim;
-    } else {
-      // New asset — register ownership (non-fatal)
-      try {
-        await protectPHash(hash, ownerEmail);
-      } catch {
-        console.warn("protectPHash failed (non-fatal) — asset will still be saved");
-      }
-    }
-  } catch {
-    // API is cold-starting or down — save as clean, blockchain unverified
-    console.warn("Blockchain API unavailable — saving asset without verification");
-    blockchainAvailable = false;
-  }
-
-  // ── Step 3: Check enforcement status (non-fatal) ──────────────────────────
-  try {
-    await getEnforcement(hash);
-  } catch {
-    // non-fatal
-  }
-
-  // ── Step 4: Build block metadata ─────────────────────────────────────────
+  let leakLocations: LeakLocation[] = [];
   const blockNumber = 18_452_193 + Math.floor(Math.random() * 9999);
   const scannedAt = new Date().toISOString();
 
-  // ── Step 5: Persist asset to Supabase ────────────────────────────────────
+  // ── Step 3: Save asset to Supabase ────────────────────────────────────────
   const { data: asset, error: aErr } = await supabase
     .from("assets")
     .insert({
@@ -76,9 +48,10 @@ export async function runScan(input: {
       storage_path: storagePath,
       size: fileSize,
       hash,
-      status,
+      status: existing.found ? "leaked" : "clean",
       block_number: blockNumber,
       scanned_at: scannedAt,
+      owner_email: existing.found ? existing.ownerEmail : ownerEmail,
     })
     .select()
     .single();
@@ -87,23 +60,27 @@ export async function runScan(input: {
     throw new Error(`Failed to save asset: ${aErr?.message ?? "unknown"}`);
   }
 
-  // ── Step 6: If leaked, persist leak location ──────────────────────────────
-  let locations: LeakLocation[] = [];
+  if (existing.found) {
+    // ── Asset already exists — this is a duplicate upload ──────────────────
+    status = "leaked";
 
-  if (status === "leaked") {
+    // Build a location entry for this new detection
+    // Use a real city from existing locations if available, otherwise Unknown
+    const refLoc = existing.locations[0];
     const leakLocation: LeakLocation = {
-      city: "Unknown",
-      country: "",
-      lat: 0,
-      lng: 0,
-      device: "Unknown Device",
-      app: "Unknown App",
-      confidence: Math.round(leakSim * 100),
+      city: refLoc?.city ?? "Unknown",
+      country: refLoc?.country ?? "",
+      lat: refLoc?.lat ?? 0,
+      lng: refLoc?.lng ?? 0,
+      device: "Web Upload",
+      app: "Sentinel Web",
+      confidence: 100,
       timestamp: scannedAt,
     };
 
-    locations = [leakLocation];
+    leakLocations = [leakLocation, ...existing.locations];
 
+    // Persist this detection as a leak_location
     await supabase.from("leak_locations").insert({
       asset_id: asset.id,
       user_id: user.id,
@@ -123,8 +100,6 @@ export async function runScan(input: {
     status,
     scannedAt,
     blockNumber,
-    locations,
-    // Pass along whether blockchain was reachable so UI can show a warning
-    ...(blockchainAvailable ? {} : { _blockchainUnavailable: true }),
-  } as ScanResult & { assetId: string };
+    locations: leakLocations,
+  };
 }
