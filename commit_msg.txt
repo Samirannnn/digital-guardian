@@ -1,7 +1,0 @@
-feat: implement supabase-based search, owner assignment, and ownership transfer
-
-- Added a database migration file to add an `owner_email` column and configure proper cross-user RLS lookup policies on the `assets` table.
-- Updated bulk upload and scan pipelines to use Supabase database query (via pHash/SHA-256) as the primary source of truth instead of the unreliable blockchain API.
-- Assigned the first uploader of any asset as the owner.
-- Rewrote the search page to look up assets directly from Supabase, display ownership status, device count, and pin leak locations on a world map.
-- Implemented ownership transfer using the recipient's email address.
