@@ -51,7 +51,7 @@ export async function runScan(input: {
       status: existing.found ? "leaked" : "clean",
       block_number: blockNumber,
       scanned_at: scannedAt,
-      owner_email: existing.found ? existing.ownerEmail : ownerEmail,
+      app_email: existing.found ? existing.ownerEmail : ownerEmail,
     })
     .select()
     .single();

@@ -21,8 +21,8 @@ import {
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { WorldMap } from "@/components/dashboard/WorldMap";
 import { useAuth } from "@/lib/auth";
-import { getFileHash } from "@/lib/phash";
-import { lookupHashInDB, uploadAssetFile } from "@/lib/assets";
+import { getFileHash, transferOwnership } from "@/lib/phash";
+import { lookupHashInDB, uploadAssetFile, transferOwnershipDB } from "@/lib/assets";
 import { supabase } from "@/integrations/supabase/client";
 import type { HashLookupResult } from "@/lib/assets";
 
@@ -62,6 +62,8 @@ function SearchPage() {
   const [searchResult, setSearchResult] = useState<HashLookupResult | null>(null);
   const [registering, setRegistering] = useState(false);
   const [copiedHash, setCopiedHash] = useState(false);
+  const [transferEmail, setTransferEmail] = useState("");
+  const [isTransferring, setIsTransferring] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !session) navigate({ to: "/auth" });
@@ -116,7 +118,7 @@ function SearchPage() {
         status: "clean",
         block_number: blockNumber,
         scanned_at: new Date().toISOString(),
-        owner_email: user.email ?? user.id,
+        app_email: user.email ?? user.id,
       });
       if (error) throw error;
       toast.success(`✅ "${file.name}" registered — you are now the owner`);
@@ -125,6 +127,35 @@ function SearchPage() {
       toast.error("Registration failed. Please try again.");
     } finally {
       setRegistering(false);
+    }
+  };
+
+  const handleTransfer = async () => {
+    if (!hash || !user?.email || !transferEmail.trim() || !searchResult) return;
+    setIsTransferring(true);
+    try {
+      // 1. Blockchain API transfer (non-fatal)
+      try {
+        await transferOwnership(hash, user.email, transferEmail.trim());
+      } catch (e) {
+        console.warn("Blockchain transfer API failed:", e);
+      }
+
+      // 2. DB transfer (primary source of truth)
+      const dbResult = await transferOwnershipDB(hash, transferEmail.trim());
+      if (dbResult.success) {
+        toast.success(`✅ Ownership transferred to ${transferEmail}`);
+        // Refresh lookup result
+        const refreshed = await lookupHashInDB(hash);
+        setSearchResult(refreshed);
+        setTransferEmail("");
+      } else {
+        toast.error(dbResult.message || "Database transfer failed.");
+      }
+    } catch {
+      toast.error("Transfer request failed.");
+    } finally {
+      setIsTransferring(false);
     }
   };
 
@@ -324,9 +355,36 @@ function SearchPage() {
                         </div>
 
                         {isCurrentUserOwner ? (
-                          <div className="flex items-start gap-2 rounded-xl bg-emerald/10 border border-emerald/20 px-3 py-2.5 text-xs text-emerald">
-                            <CheckCircle2 size={14} className="shrink-0 mt-0.5" />
-                            <span>You are the registered owner of this asset.</span>
+                          <div className="space-y-3">
+                            <div className="flex items-start gap-2 rounded-xl bg-emerald/10 border border-emerald/20 px-3 py-2.5 text-xs text-emerald">
+                              <CheckCircle2 size={14} className="shrink-0 mt-0.5" />
+                              <span>You are the registered owner of this asset.</span>
+                            </div>
+                            <div className="rounded-xl border border-border bg-black/20 p-3.5 space-y-2.5">
+                              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                                Transfer Ownership
+                              </div>
+                              <div className="flex gap-2">
+                                <input
+                                  type="email"
+                                  value={transferEmail}
+                                  onChange={(e) => setTransferEmail(e.target.value)}
+                                  placeholder="recipient@example.com"
+                                  className="flex-1 rounded-lg bg-black/40 border border-border px-3 py-1.5 text-xs outline-none focus:border-primary/60 placeholder:text-muted-foreground/50"
+                                />
+                                <button
+                                  onClick={handleTransfer}
+                                  disabled={isTransferring || !transferEmail.trim()}
+                                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-primary to-cyber text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-opacity"
+                                >
+                                  {isTransferring ? (
+                                    <Loader2 size={12} className="animate-spin" />
+                                  ) : (
+                                    "Transfer"
+                                  )}
+                                </button>
+                              </div>
+                            </div>
                           </div>
                         ) : (
                           <div className="flex items-start gap-2 rounded-xl bg-crimson/10 border border-crimson/20 px-3 py-2.5 text-xs text-crimson">

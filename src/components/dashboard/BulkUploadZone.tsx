@@ -148,7 +148,7 @@ export function BulkUploadZone({ userId, userEmail, onComplete }: Props) {
         status: scanStatus,
         block_number: blockNumber,
         scanned_at: new Date().toISOString(),
-        owner_email: existing.found ? (existing.ownerEmail ?? null) : userEmail,
+        app_email: existing.found ? (existing.ownerEmail ?? null) : userEmail,
       });
 
       if (dbErr) {
@@ -168,7 +168,7 @@ export function BulkUploadZone({ userId, userEmail, onComplete }: Props) {
         status: "clean",
         block_number: 18_452_193 + Math.floor(Math.random() * 9999),
         scanned_at: new Date().toISOString(),
-        owner_email: userEmail,
+        app_email: userEmail,
       });
       updateEntry(id, { status: "done", scanStatus: "clean", progress: 100 });
     }

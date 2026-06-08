@@ -14,7 +14,7 @@ export type DbAsset = {
   block_number: number | null;
   scanned_at: string;
   created_at: string;
-  owner_email?: string | null;
+  app_email?: string | null;
 };
 
 export type AssetWithLocations = DbAsset & {
@@ -180,7 +180,7 @@ export async function lookupHashInDB(hash: string): Promise<HashLookupResult> {
   // Find all assets with this hash (across all users)
   const { data: assets, error } = await supabase
     .from("assets")
-    .select("id, name, user_id, owner_email, created_at")
+    .select("id, name, user_id, app_email, created_at")
     .eq("hash", hash)
     .order("created_at", { ascending: true }); // oldest first = original owner
 
@@ -222,7 +222,7 @@ export async function lookupHashInDB(hash: string): Promise<HashLookupResult> {
 
   return {
     found: true,
-    ownerEmail: original.owner_email ?? null,
+    ownerEmail: original.app_email ?? null,
     ownerUserId: original.user_id,
     assetId: original.id,
     assetName: original.name,
@@ -237,13 +237,13 @@ export async function lookupHashInDB(hash: string): Promise<HashLookupResult> {
  * Only the current owner (matched by user_id) can do this.
  */
 export async function transferOwnershipDB(
-  assetId: string,
+  hash: string,
   newOwnerEmail: string,
 ): Promise<{ success: boolean; message?: string }> {
   const { error } = await supabase
     .from("assets")
-    .update({ owner_email: newOwnerEmail })
-    .eq("id", assetId);
+    .update({ app_email: newOwnerEmail })
+    .eq("hash", hash);
 
   if (error) return { success: false, message: error.message };
   return { success: true };

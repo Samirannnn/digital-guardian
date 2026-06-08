@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
-import { toScanResult, deleteAsset, type AssetWithLocations } from "@/lib/assets";
+import { toScanResult, deleteAsset, transferOwnershipDB, type AssetWithLocations } from "@/lib/assets";
 import { ResultView } from "@/components/dashboard/ResultView";
 import { enforceBlur, transferOwnership } from "@/lib/phash";
 
@@ -89,13 +89,23 @@ function VaultPage() {
     if (!transferTarget || !user?.email || !newOwnerEmail.trim()) return;
     setIsTransferring(true);
     try {
-      const result = await transferOwnership(transferTarget.hash, user.email, newOwnerEmail.trim());
-      if (result.success) {
+      // 1. Call blockchain transfer (optional/non-fatal)
+      try {
+        await transferOwnership(transferTarget.hash, user.email, newOwnerEmail.trim());
+      } catch (e) {
+        console.warn("Blockchain transfer API failed:", e);
+      }
+
+      // 2. Update local database (primary source of truth)
+      const dbResult = await transferOwnershipDB(transferTarget.hash, newOwnerEmail.trim());
+
+      if (dbResult.success) {
         toast.success(`✅ Ownership of "${transferTarget.name}" transferred to ${newOwnerEmail}`);
         setTransferTarget(null);
         setNewOwnerEmail("");
+        refetch(); // Refresh list to reflect ownership changes
       } else {
-        toast.error(result.message || "Transfer failed — you may not be the registered owner.");
+        toast.error(dbResult.message || "Transfer failed on database.");
       }
     } catch {
       toast.error("Transfer request failed.");

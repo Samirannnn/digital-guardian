@@ -27,6 +27,7 @@ export type Database = {
           storage_path: string
           updated_at: string
           user_id: string
+          app_email: string | null
         }
         Insert: {
           block_number?: number | null
@@ -40,6 +41,7 @@ export type Database = {
           storage_path: string
           updated_at?: string
           user_id: string
+          app_email?: string | null
         }
         Update: {
           block_number?: number | null
@@ -53,6 +55,7 @@ export type Database = {
           storage_path?: string
           updated_at?: string
           user_id?: string
+          app_email?: string | null
         }
         Relationships: []
       }
