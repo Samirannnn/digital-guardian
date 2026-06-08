@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { UploadCloud, FileImage, Fingerprint } from "lucide-react";
+import { UploadCloud, Fingerprint } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 type Props = {
@@ -15,7 +15,7 @@ export function UploadZone({ onFile, scanning, progress, stage }: Props) {
 
   const handleFile = useCallback(
     (file?: File | null) => {
-      if (!file || !file.type.startsWith("image/")) return;
+      if (!file) return;
       onFile(file);
     },
     [onFile],
@@ -45,7 +45,7 @@ export function UploadZone({ onFile, scanning, progress, stage }: Props) {
       <input
         ref={inputRef}
         type="file"
-        accept="image/*"
+        accept="*/*"
         className="hidden"
         onChange={(e) => handleFile(e.target.files?.[0])}
       />
@@ -67,16 +67,18 @@ export function UploadZone({ onFile, scanning, progress, stage }: Props) {
                 </div>
               </div>
               <h3 className="text-xl font-semibold tracking-tight">
-                Drop an image to generate its <span className="text-gradient-primary">Digital DNA</span>
+                Drop any file to scan its <span className="text-gradient-primary">Digital DNA</span>
               </h3>
               <p className="mt-2 text-sm text-muted-foreground max-w-md">
-                We compute a perceptual hash and query the blockchain ledger for unauthorized
-                redistribution across the Android network.
+                We compute a perceptual hash (images) or SHA-256 fingerprint (other files) and query
+                the blockchain ledger for unauthorized redistribution.
               </p>
-              <div className="mt-5 flex items-center gap-2 text-[11px] font-mono text-muted-foreground">
-                <FileImage size={13} /> JPG · PNG · WebP
-                <span className="opacity-40">·</span>
-                <Fingerprint size={13} /> pHash 64-bit
+              <div className="mt-5 flex flex-wrap justify-center gap-2 text-[11px] font-mono text-muted-foreground">
+                {["JPG · PNG · WebP", "PDF", "MP3", "ZIP", "Any file"].map((t) => (
+                  <span key={t} className="px-2 py-0.5 rounded-full border border-border bg-black/30">
+                    {t}
+                  </span>
+                ))}
               </div>
             </motion.div>
           ) : (

@@ -6,11 +6,13 @@ import {
   FolderLock,
   AlertTriangle,
   Globe2,
+  Search,
 } from "lucide-react";
 
 const items = [
   { to: "/", label: "Overview", icon: LayoutDashboard },
   { to: "/vault", label: "Media Vault", icon: FolderLock },
+  { to: "/search", label: "Asset Search", icon: Search },
   { to: "/alerts", label: "Security Alerts", icon: AlertTriangle },
   { to: "/map", label: "Global Tracking", icon: Globe2 },
 ];

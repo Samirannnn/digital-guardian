@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as VaultRouteImport } from './routes/vault'
+import { Route as SearchRouteImport } from './routes/search'
 import { Route as MapRouteImport } from './routes/map'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AlertsRouteImport } from './routes/alerts'
@@ -18,6 +19,11 @@ import { Route as IndexRouteImport } from './routes/index'
 const VaultRoute = VaultRouteImport.update({
   id: '/vault',
   path: '/vault',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SearchRoute = SearchRouteImport.update({
+  id: '/search',
+  path: '/search',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MapRoute = MapRouteImport.update({
@@ -46,6 +52,7 @@ export interface FileRoutesByFullPath {
   '/alerts': typeof AlertsRoute
   '/auth': typeof AuthRoute
   '/map': typeof MapRoute
+  '/search': typeof SearchRoute
   '/vault': typeof VaultRoute
 }
 export interface FileRoutesByTo {
@@ -53,6 +60,7 @@ export interface FileRoutesByTo {
   '/alerts': typeof AlertsRoute
   '/auth': typeof AuthRoute
   '/map': typeof MapRoute
+  '/search': typeof SearchRoute
   '/vault': typeof VaultRoute
 }
 export interface FileRoutesById {
@@ -61,14 +69,15 @@ export interface FileRoutesById {
   '/alerts': typeof AlertsRoute
   '/auth': typeof AuthRoute
   '/map': typeof MapRoute
+  '/search': typeof SearchRoute
   '/vault': typeof VaultRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/alerts' | '/auth' | '/map' | '/vault'
+  fullPaths: '/' | '/alerts' | '/auth' | '/map' | '/search' | '/vault'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/alerts' | '/auth' | '/map' | '/vault'
-  id: '__root__' | '/' | '/alerts' | '/auth' | '/map' | '/vault'
+  to: '/' | '/alerts' | '/auth' | '/map' | '/search' | '/vault'
+  id: '__root__' | '/' | '/alerts' | '/auth' | '/map' | '/search' | '/vault'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -76,6 +85,7 @@ export interface RootRouteChildren {
   AlertsRoute: typeof AlertsRoute
   AuthRoute: typeof AuthRoute
   MapRoute: typeof MapRoute
+  SearchRoute: typeof SearchRoute
   VaultRoute: typeof VaultRoute
 }
 
@@ -86,6 +96,13 @@ declare module '@tanstack/react-router' {
       path: '/vault'
       fullPath: '/vault'
       preLoaderRoute: typeof VaultRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/search': {
+      id: '/search'
+      path: '/search'
+      fullPath: '/search'
+      preLoaderRoute: typeof SearchRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/map': {
@@ -124,6 +141,7 @@ const rootRouteChildren: RootRouteChildren = {
   AlertsRoute: AlertsRoute,
   AuthRoute: AuthRoute,
   MapRoute: MapRoute,
+  SearchRoute: SearchRoute,
   VaultRoute: VaultRoute,
 }
 export const routeTree = rootRouteImport

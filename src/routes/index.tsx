@@ -7,10 +7,13 @@ import {
   AlertOctagon,
   Boxes,
   Cpu,
+  UploadCloud,
+  Search,
 } from "lucide-react";
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { UploadZone } from "@/components/dashboard/UploadZone";
+import { BulkUploadZone } from "@/components/dashboard/BulkUploadZone";
 import { ResultView } from "@/components/dashboard/ResultView";
 import { SecurityAlertBanner } from "@/components/dashboard/SecurityAlertBanner";
 import type { ScanResult } from "@/lib/dna";
@@ -23,7 +26,7 @@ import {
 } from "@/lib/assets";
 import { runScan } from "@/lib/scan.functions";
 
-export const Route = createFileRoute("/")({
+export const Route = createFileRoute("/")(  {
   head: () => ({
     meta: [
       { title: "Sentinel — Digital Asset Protection Dashboard" },
@@ -44,17 +47,20 @@ export const Route = createFileRoute("/")({
 });
 
 const stages = [
-  "Reading EXIF & color matrix…",
-  "Computing perceptual hash (pHash)…",
+  "Reading file metadata…",
+  "Computing fingerprint…",
   "Querying Polygon ledger nodes…",
   "Cross-referencing 1,284 Android beacons…",
   "Compiling distribution report…",
 ];
 
+type Tab = "bulk" | "scan";
+
 function OverviewPage() {
   const navigate = useNavigate();
   const { session, user, profile, loading: authLoading } = useAuth();
 
+  const [tab, setTab] = useState<Tab>("bulk");
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [stage, setStage] = useState(stages[0]);
@@ -166,7 +172,7 @@ function OverviewPage() {
           <p className="mt-1 text-sm text-muted-foreground">
             {totalLeaks > 0
               ? `${totalLeaks} active leak${totalLeaks > 1 ? "s" : ""} detected across the Android network.`
-              : "Your protected library is clean. Drop a new asset below to register its signature."}
+              : "Your protected library is clean. Register assets below or use Quick Scan."}
           </p>
         </div>
 
@@ -212,39 +218,90 @@ function OverviewPage() {
           />
         </div>
 
-        {/* Main content */}
-        <div className="space-y-4">
-          <AnimatePresence mode="wait">
-            {result && imageUrl ? (
-              <ResultView
-                key="result"
-                imageUrl={imageUrl}
-                result={result}
-                onClose={() => {
-                  setResult(null);
-                  setImageUrl(null);
-                }}
-              />
-            ) : (
-              <motion.div
-                key="upload"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-              >
-                <UploadZone
-                  onFile={handleFile}
-                  scanning={scanning}
-                  progress={progress}
-                  stage={stage}
+        {/* Tab switcher */}
+        <div className="flex gap-1 p-1 rounded-xl bg-black/30 border border-border w-fit">
+          {([
+            { id: "bulk" as Tab, label: "Bulk Register", icon: UploadCloud },
+            { id: "scan" as Tab, label: "Quick Scan", icon: Search },
+          ] as const).map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              onClick={() => { setTab(id); setResult(null); setImageUrl(null); }}
+              className={`relative flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                tab === id
+                  ? "text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {tab === id && (
+                <motion.div
+                  layoutId="tab-bg"
+                  className="absolute inset-0 rounded-lg bg-gradient-to-r from-primary/20 to-cyber/10 border border-primary/30"
+                  transition={{ type: "spring", stiffness: 380, damping: 30 }}
                 />
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Recent uploads strip */}
-          <RecentStrip />
+              )}
+              <Icon size={14} className={`relative ${tab === id ? "text-primary" : ""}`} />
+              <span className="relative">{label}</span>
+            </button>
+          ))}
         </div>
+
+        {/* Main content */}
+        <AnimatePresence mode="wait">
+          {tab === "bulk" ? (
+            <motion.div
+              key="bulk"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+            >
+              <BulkUploadZone
+                userId={user!.id}
+                userEmail={user!.email ?? user!.id}
+                onComplete={refresh}
+              />
+            </motion.div>
+          ) : (
+            <motion.div
+              key="scan"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              className="space-y-4"
+            >
+              <AnimatePresence mode="wait">
+                {result && imageUrl ? (
+                  <ResultView
+                    key="result"
+                    imageUrl={imageUrl}
+                    result={result}
+                    onClose={() => {
+                      setResult(null);
+                      setImageUrl(null);
+                    }}
+                  />
+                ) : (
+                  <motion.div
+                    key="upload"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                  >
+                    <UploadZone
+                      onFile={handleFile}
+                      scanning={scanning}
+                      progress={progress}
+                      stage={stage}
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Recent uploads strip */}
+              <RecentStrip />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </DashboardLayout>
   );
@@ -272,7 +329,13 @@ function RecentStrip() {
             >
               {it.signedUrl ? (
                 <img src={it.signedUrl} alt={it.name} className="h-full w-full object-cover" />
-              ) : null}
+              ) : (
+                <div className="h-full w-full flex items-center justify-center bg-primary/5">
+                  <span className="text-[9px] font-mono text-muted-foreground text-center px-1 break-all">
+                    {it.name.split(".").pop()?.toUpperCase()}
+                  </span>
+                </div>
+              )}
               <div className="absolute inset-0 bg-gradient-to-t from-black/85 to-transparent" />
               <div
                 className={`absolute top-1.5 right-1.5 grid h-5 w-5 place-items-center rounded-full ${
@@ -295,4 +358,3 @@ function RecentStrip() {
     </div>
   );
 }
-

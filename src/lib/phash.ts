@@ -1,6 +1,45 @@
 export const API_BASE = "https://phash-api-343477732259.asia-south1.run.app";
 
 /**
+ * Returns true if the file should be fingerprinted with pHash (image-based).
+ * Videos are excluded intentionally — we fall through to SHA-256.
+ */
+export function isImageFile(file: File): boolean {
+  return file.type.startsWith("image/");
+}
+
+/**
+ * Generate a SHA-256 content hash for any file.
+ * Returns a 64-char lowercase hex string.
+ */
+export async function generateSHA256(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  const hashBuf = await crypto.subtle.digest("SHA-256", buffer);
+  return Array.from(new Uint8Array(hashBuf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+/**
+ * Unified fingerprint: pHash for images, SHA-256 for everything else.
+ * Returns { hash, method } so callers know which algorithm was used.
+ */
+export async function getFileHash(
+  file: File,
+): Promise<{ hash: string; method: "phash" | "sha256" }> {
+  if (isImageFile(file)) {
+    try {
+      const hash = await generatePHash(file);
+      return { hash, method: "phash" };
+    } catch {
+      // fallback if canvas fails (e.g. SVG, tiff edge cases)
+    }
+  }
+  const hash = await generateSHA256(file);
+  return { hash, method: "sha256" };
+}
+
+/**
  * Generate a perceptual hash from an image File.
  * EXACTLY mirrors the Kotlin PHashGenerator:
  *   1. Resize to 32×32

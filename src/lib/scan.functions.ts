@@ -1,6 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { LeakLocation, ScanResult } from "./dna";
-import { generatePHash, searchPHash, protectPHash, getEnforcement } from "./phash";
+import { getFileHash, searchPHash, protectPHash, getEnforcement } from "./phash";
 
 /**
  * Client-side scan pipeline:
@@ -28,8 +28,8 @@ export async function runScan(input: {
   const { fileName, fileSize, storagePath, file } = input.data;
   const ownerEmail = user.email || user.id;
 
-  // ── Step 1: Generate pHash (matches Android app exactly) ─────────────────
-  const hash = await generatePHash(file);
+  // ── Step 1: Generate hash (pHash for images, SHA-256 for everything else) ─
+  const { hash, method: hashMethod } = await getFileHash(file);
 
   // ── Step 2: Search blockchain ─────────────────────────────────────────────
   const searchResult = await searchPHash(hash);

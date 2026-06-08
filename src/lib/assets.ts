@@ -132,6 +132,33 @@ export async function uploadAssetFile(userId: string, file: File): Promise<strin
   return path;
 }
 
+/**
+ * Bulk-upload multiple files with a concurrency cap of 3.
+ * Calls onProgress(fileName, storagePath | Error) after each file settles.
+ */
+export async function bulkUploadAssets(
+  userId: string,
+  files: File[],
+  onProgress: (fileName: string, result: string | Error) => void,
+): Promise<void> {
+  const CONCURRENCY = 3;
+  let index = 0;
+
+  async function worker() {
+    while (index < files.length) {
+      const file = files[index++];
+      try {
+        const path = await uploadAssetFile(userId, file);
+        onProgress(file.name, path);
+      } catch (err) {
+        onProgress(file.name, err instanceof Error ? err : new Error(String(err)));
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+}
+
 // Delete an asset from database and storage
 export async function deleteAsset(id: string, storagePath: string) {
   // 1. Remove from storage
