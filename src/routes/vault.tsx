@@ -17,7 +17,18 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
-import { toScanResult, deleteAsset, transferOwnershipDB, type AssetWithLocations } from "@/lib/assets";
+import {
+  toScanResult,
+  deleteAsset,
+  transferOwnershipDB,
+  checkEmailExists,
+  createTransferRequest,
+  fetchPendingTransfers,
+  acceptTransfer,
+  rejectTransfer,
+  type AssetWithLocations,
+  type TransferRequestWithAsset
+} from "@/lib/assets";
 import { ResultView } from "@/components/dashboard/ResultView";
 import { enforceBlur, transferOwnership } from "@/lib/phash";
 
@@ -43,7 +54,23 @@ function VaultPage() {
   const [transferTarget, setTransferTarget] = useState<AssetWithLocations | null>(null);
   const [newOwnerEmail, setNewOwnerEmail] = useState("");
   const [isTransferring, setIsTransferring] = useState(false);
+  const [incomingRequests, setIncomingRequests] = useState<TransferRequestWithAsset[]>([]);
+  const [actioningRequestId, setActioningRequestId] = useState<string | null>(null);
   useAssetsRealtime();
+
+  const fetchRequests = async () => {
+    if (!user?.id) return;
+    try {
+      const reqs = await fetchPendingTransfers(user.id);
+      setIncomingRequests(reqs);
+    } catch (err) {
+      console.error("Failed to fetch pending transfers:", err);
+    }
+  };
+
+  useEffect(() => {
+    fetchRequests();
+  }, [user?.id]);
 
   useEffect(() => {
     if (!authLoading && !session) navigate({ to: "/auth" });
@@ -86,31 +113,78 @@ function VaultPage() {
   };
 
   const handleTransfer = async () => {
-    if (!transferTarget || !user?.email || !newOwnerEmail.trim()) return;
+    if (!transferTarget || !user?.id || !user?.email || !newOwnerEmail.trim()) return;
     setIsTransferring(true);
     try {
-      // 1. Call blockchain transfer (optional/non-fatal)
+      // 1. Check if recipient exists in the DB
+      const recipientUserId = await checkEmailExists(newOwnerEmail.trim());
+      if (!recipientUserId) {
+        toast.error(`❌ User with email "${newOwnerEmail}" does not have an account.`);
+        setIsTransferring(false);
+        return;
+      }
+
+      // 2. Call blockchain transfer (optional/non-fatal)
       try {
         await transferOwnership(transferTarget.hash, user.email, newOwnerEmail.trim());
       } catch (e) {
         console.warn("Blockchain transfer API failed:", e);
       }
 
-      // 2. Update local database (primary source of truth)
-      const dbResult = await transferOwnershipDB(transferTarget.hash, newOwnerEmail.trim());
+      // 3. Create a pending transfer request in database
+      const dbResult = await createTransferRequest(
+        transferTarget.id,
+        user.id,
+        recipientUserId,
+        newOwnerEmail.trim()
+      );
 
       if (dbResult.success) {
-        toast.success(`✅ Ownership of "${transferTarget.name}" transferred to ${newOwnerEmail}`);
+        toast.success(`📩 Ownership transfer request sent to ${newOwnerEmail}. They must accept it to complete the transfer.`);
         setTransferTarget(null);
         setNewOwnerEmail("");
-        refetch(); // Refresh list to reflect ownership changes
       } else {
-        toast.error(dbResult.message || "Transfer failed on database.");
+        toast.error(dbResult.message || "Transfer request failed.");
       }
     } catch {
       toast.error("Transfer request failed.");
     } finally {
       setIsTransferring(false);
+    }
+  };
+
+  const handleAcceptRequest = async (requestId: string, assetName = "Asset") => {
+    setActioningRequestId(requestId);
+    try {
+      const res = await acceptTransfer(requestId);
+      if (res.success) {
+        toast.success(`🎉 You are now the owner of "${assetName}"!`);
+        refetch(); // Refetch vault assets
+        fetchRequests(); // Refetch requests list
+      } else {
+        toast.error(res.message || "Failed to accept transfer.");
+      }
+    } catch {
+      toast.error("Failed to accept transfer.");
+    } finally {
+      setActioningRequestId(null);
+    }
+  };
+
+  const handleRejectRequest = async (requestId: string, assetName = "Asset") => {
+    setActioningRequestId(requestId);
+    try {
+      const res = await rejectTransfer(requestId);
+      if (res.success) {
+        toast.success(`Rejected ownership request for "${assetName}"`);
+        fetchRequests(); // Refetch requests list
+      } else {
+        toast.error(res.message || "Failed to reject transfer.");
+      }
+    } catch {
+      toast.error("Failed to reject transfer.");
+    } finally {
+      setActioningRequestId(null);
     }
   };
 
@@ -148,6 +222,52 @@ function VaultPage() {
           )}
         </header>
 
+        {/* Pending Transfer Requests */}
+        {incomingRequests.length > 0 && !selectedAsset && (
+          <div className="space-y-3 p-4 rounded-xl border border-border bg-card/20 mb-6">
+            <div className="text-[11px] uppercase tracking-[0.2em] text-primary font-semibold flex items-center gap-1.5">
+              <Send size={12} className="rotate-180" /> Pending Ownership Transfers
+            </div>
+            <div className="grid gap-2">
+              {incomingRequests.map((req) => (
+                <div
+                  key={req.id}
+                  className="glass rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-l-4 border-l-primary bg-black/30"
+                >
+                  <div>
+                    <div className="text-xs font-semibold">
+                      Accept ownership of "{req.assets?.name ?? "Asset"}"?
+                    </div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5 font-mono">
+                      Hash: {req.assets?.hash.slice(0, 16)}…
+                    </div>
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    <button
+                      onClick={() => handleAcceptRequest(req.id, req.assets?.name)}
+                      disabled={actioningRequestId === req.id}
+                      className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-1 cursor-pointer"
+                    >
+                      {actioningRequestId === req.id ? (
+                        <Loader2 size={10} className="animate-spin" />
+                      ) : (
+                        "Accept"
+                      )}
+                    </button>
+                    <button
+                      onClick={() => handleRejectRequest(req.id, req.assets?.name)}
+                      disabled={actioningRequestId === req.id}
+                      className="px-2.5 py-1.5 rounded-lg text-[11px] text-muted-foreground hover:text-foreground border border-border transition-colors disabled:opacity-50 cursor-pointer"
+                    >
+                      Reject
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {isLoading ? (
           <div className="text-sm text-muted-foreground font-mono">Loading vault…</div>
         ) : items.length === 0 ? (
@@ -158,6 +278,7 @@ function VaultPage() {
               key="result"
               imageUrl={selectedAsset.signedUrl ?? ""}
               result={toScanResult(selectedAsset)}
+              ownerEmail={selectedAsset.app_email}
               onClose={() => setSelectedAsset(null)}
             />
           </AnimatePresence>

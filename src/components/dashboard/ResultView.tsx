@@ -6,10 +6,11 @@ import { WorldMap } from "./WorldMap";
 type Props = {
   imageUrl: string;
   result: ScanResult;
+  ownerEmail?: string | null;
   onClose: () => void;
 };
 
-export function ResultView({ imageUrl, result, onClose }: Props) {
+export function ResultView({ imageUrl, result, ownerEmail, onClose }: Props) {
   const leaked = result.status === "leaked";
   return (
     <motion.div
@@ -19,44 +20,55 @@ export function ResultView({ imageUrl, result, onClose }: Props) {
       className="grid gap-4 lg:grid-cols-2"
     >
       {/* LEFT — image + signature */}
-      <div className="glass rounded-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <div className="flex items-center gap-2">
-            <Hash size={14} className="text-primary" />
-            <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
-              Signature Generated
-            </span>
+      <div className="glass rounded-2xl overflow-hidden flex flex-col justify-between">
+        <div>
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+            <div className="flex items-center gap-2">
+              <Hash size={14} className="text-primary" />
+              <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                Signature Generated
+              </span>
+            </div>
+            <button
+              onClick={onClose}
+              className="grid h-7 w-7 place-items-center rounded-md hover:bg-white/5 text-muted-foreground"
+            >
+              <X size={14} />
+            </button>
           </div>
-          <button
-            onClick={onClose}
-            className="grid h-7 w-7 place-items-center rounded-md hover:bg-white/5 text-muted-foreground"
-          >
-            <X size={14} />
-          </button>
+
+          <div className="relative aspect-[4/3] bg-black/40">
+            <img src={imageUrl} alt="Scanned asset" className="absolute inset-0 h-full w-full object-cover" />
+            {/* hex overlay */}
+            <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
+            <div className="absolute inset-x-0 bottom-0 p-4 font-mono text-[10px] leading-relaxed text-primary/90">
+              <div className="text-[9px] uppercase tracking-[0.2em] text-primary/70 mb-1.5">
+                pHash · 256 bit
+              </div>
+              <div className="break-all">
+                {result.hash.match(/.{1,4}/g)?.join(" ")}
+              </div>
+            </div>
+            {/* scanning grid corners */}
+            {["top-3 left-3 border-l-2 border-t-2", "top-3 right-3 border-r-2 border-t-2", "bottom-3 left-3 border-l-2 border-b-2", "bottom-3 right-3 border-r-2 border-b-2"].map((c) => (
+              <div key={c} className={`absolute h-5 w-5 border-primary ${c}`} />
+            ))}
+          </div>
         </div>
 
-        <div className="relative aspect-[4/3] bg-black/40">
-          <img src={imageUrl} alt="Scanned asset" className="absolute inset-0 h-full w-full object-cover" />
-          {/* hex overlay */}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
-          <div className="absolute inset-x-0 bottom-0 p-4 font-mono text-[10px] leading-relaxed text-primary/90">
-            <div className="text-[9px] uppercase tracking-[0.2em] text-primary/70 mb-1.5">
-              pHash · 256 bit
+        <div>
+          {ownerEmail && (
+            <div className="px-4 py-3 border-t border-border bg-black/20 flex items-center justify-between text-xs">
+              <span className="text-muted-foreground font-mono">Registered Owner:</span>
+              <span className="font-mono text-primary font-medium">{ownerEmail}</span>
             </div>
-            <div className="break-all">
-              {result.hash.match(/.{1,4}/g)?.join(" ")}
-            </div>
-          </div>
-          {/* scanning grid corners */}
-          {["top-3 left-3 border-l-2 border-t-2", "top-3 right-3 border-r-2 border-t-2", "bottom-3 left-3 border-l-2 border-b-2", "bottom-3 right-3 border-r-2 border-b-2"].map((c) => (
-            <div key={c} className={`absolute h-5 w-5 border-primary ${c}`} />
-          ))}
-        </div>
+          )}
 
-        <div className="grid grid-cols-3 gap-px bg-border">
-          <Stat label="Block #" value={`#${result.blockNumber.toLocaleString()}`} />
-          <Stat label="Algorithm" value="pHash-256" />
-          <Stat label="Network" value="Polygon" />
+          <div className="grid grid-cols-3 gap-px bg-border border-t border-border">
+            <Stat label="Block #" value={`#${result.blockNumber.toLocaleString()}`} />
+            <Stat label="Algorithm" value="pHash-256" />
+            <Stat label="Network" value="Polygon" />
+          </div>
         </div>
       </div>
 
@@ -79,6 +91,13 @@ export function ResultView({ imageUrl, result, onClose }: Props) {
             Distribution Report
           </span>
         </div>
+
+        {leaked && (
+          <div className="mx-4 mt-4 p-3 rounded-xl bg-crimson/10 border border-crimson/25 text-xs text-crimson flex items-center gap-2">
+            <ShieldAlert size={14} className="shrink-0 animate-pulse text-crimson" />
+            <span><strong>Leak Alert:</strong> Unauthorized copies of this digital asset have been discovered on client devices.</span>
+          </div>
+        )}
 
         {leaked ? (
           <>

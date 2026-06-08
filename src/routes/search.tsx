@@ -22,7 +22,7 @@ import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { WorldMap } from "@/components/dashboard/WorldMap";
 import { useAuth } from "@/lib/auth";
 import { getFileHash, transferOwnership } from "@/lib/phash";
-import { lookupHashInDB, uploadAssetFile, transferOwnershipDB } from "@/lib/assets";
+import { lookupHashInDB, uploadAssetFile, checkEmailExists, createTransferRequest } from "@/lib/assets";
 import { supabase } from "@/integrations/supabase/client";
 import type { HashLookupResult } from "@/lib/assets";
 
@@ -131,26 +131,40 @@ function SearchPage() {
   };
 
   const handleTransfer = async () => {
-    if (!hash || !user?.email || !transferEmail.trim() || !searchResult) return;
+    if (!hash || !user?.id || !user?.email || !transferEmail.trim() || !searchResult || !searchResult.assetId) return;
     setIsTransferring(true);
     try {
-      // 1. Blockchain API transfer (non-fatal)
+      // 1. Check if recipient exists in DB
+      const recipientUserId = await checkEmailExists(transferEmail.trim());
+      if (!recipientUserId) {
+        toast.error(`❌ User with email "${transferEmail}" does not have an account.`);
+        setIsTransferring(false);
+        return;
+      }
+
+      // 2. Blockchain API transfer (non-fatal)
       try {
         await transferOwnership(hash, user.email, transferEmail.trim());
       } catch (e) {
         console.warn("Blockchain transfer API failed:", e);
       }
 
-      // 2. DB transfer (primary source of truth)
-      const dbResult = await transferOwnershipDB(hash, transferEmail.trim());
+      // 3. Create a pending transfer request in database
+      const dbResult = await createTransferRequest(
+        searchResult.assetId,
+        user.id,
+        recipientUserId,
+        transferEmail.trim()
+      );
+
       if (dbResult.success) {
-        toast.success(`✅ Ownership transferred to ${transferEmail}`);
+        toast.success(`📩 Ownership transfer request sent to ${transferEmail}. They must accept it to complete the transfer.`);
         // Refresh lookup result
         const refreshed = await lookupHashInDB(hash);
         setSearchResult(refreshed);
         setTransferEmail("");
       } else {
-        toast.error(dbResult.message || "Database transfer failed.");
+        toast.error(dbResult.message || "Database transfer request failed.");
       }
     } catch {
       toast.error("Transfer request failed.");

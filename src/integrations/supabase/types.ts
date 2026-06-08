@@ -117,6 +117,7 @@ export type Database = {
           id: string
           updated_at: string
           user_id: string
+          email: string | null
         }
         Insert: {
           avatar_url?: string | null
@@ -125,6 +126,7 @@ export type Database = {
           id?: string
           updated_at?: string
           user_id: string
+          email?: string | null
         }
         Update: {
           avatar_url?: string | null
@@ -133,8 +135,50 @@ export type Database = {
           id?: string
           updated_at?: string
           user_id?: string
+          email?: string | null
         }
         Relationships: []
+      }
+      transfer_requests: {
+        Row: {
+          id: string
+          asset_id: string
+          sender_id: string
+          recipient_id: string
+          recipient_email: string
+          status: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          asset_id: string
+          sender_id: string
+          recipient_id: string
+          recipient_email: string
+          status?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          asset_id?: string
+          sender_id?: string
+          recipient_id?: string
+          recipient_email?: string
+          status?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "transfer_requests_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "assets"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {

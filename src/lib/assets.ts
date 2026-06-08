@@ -259,3 +259,120 @@ export async function deleteAsset(id: string, storagePath: string) {
   const { error } = await supabase.from("assets").delete().eq("id", id);
   if (error) throw error;
 }
+
+/**
+ * Check if a user account exists with this email address.
+ * Returns the profile's user_id if found, or null if not found.
+ */
+export async function checkEmailExists(email: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("user_id")
+    .eq("email", email)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Error checking email existence:", error);
+    return null;
+  }
+  return data?.user_id ?? null;
+}
+
+/**
+ * Creates a pending transfer request in the database.
+ */
+export async function createTransferRequest(
+  assetId: string,
+  senderId: string,
+  recipientId: string,
+  recipientEmail: string,
+): Promise<{ success: boolean; message?: string }> {
+  // Check if a pending transfer already exists for this asset to avoid duplicates
+  const { data: existing } = await supabase
+    .from("transfer_requests")
+    .select("id")
+    .eq("asset_id", assetId)
+    .eq("status", "pending")
+    .maybeSingle();
+
+  if (existing) {
+    return { success: false, message: "A pending transfer request already exists for this asset." };
+  }
+
+  const { error } = await supabase.from("transfer_requests").insert({
+    asset_id: assetId,
+    sender_id: senderId,
+    recipient_id: recipientId,
+    recipient_email: recipientEmail,
+    status: "pending",
+  });
+
+  if (error) return { success: false, message: error.message };
+  return { success: true };
+}
+
+/**
+ * Fetches all incoming pending transfer requests for the current user.
+ */
+export type TransferRequestWithAsset = {
+  id: string;
+  asset_id: string;
+  sender_id: string;
+  recipient_id: string;
+  recipient_email: string;
+  status: string;
+  created_at: string;
+  assets: {
+    name: string;
+    hash: string;
+  } | null;
+};
+
+export async function fetchPendingTransfers(userId: string): Promise<TransferRequestWithAsset[]> {
+  const { data, error } = await supabase
+    .from("transfer_requests")
+    .select(`
+      id,
+      asset_id,
+      sender_id,
+      recipient_id,
+      recipient_email,
+      status,
+      created_at,
+      assets (
+        name,
+        hash
+      )
+    `)
+    .eq("recipient_id", userId)
+    .eq("status", "pending")
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  return (data as any) ?? [];
+}
+
+/**
+ * Accepts a transfer request by calling the accept_transfer_request RPC function.
+ */
+export async function acceptTransfer(requestId: string): Promise<{ success: boolean; message?: string }> {
+  const { data, error } = await supabase.rpc("accept_transfer_request", {
+    request_id: requestId,
+  });
+
+  if (error) return { success: false, message: error.message };
+  return { success: data as boolean };
+}
+
+/**
+ * Rejects a transfer request.
+ */
+export async function rejectTransfer(requestId: string): Promise<{ success: boolean; message?: string }> {
+  const { error } = await supabase
+    .from("transfer_requests")
+    .update({ status: "rejected" })
+    .eq("id", requestId);
+
+  if (error) return { success: false, message: error.message };
+  return { success: true };
+}
