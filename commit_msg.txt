@@ -1,8 +1,0 @@
-feat: implement ownership transfer workflow with email checks and accept/reject mechanism
-
-- Added a database migration file `20260608010000_ownership_transfer_workflow.sql` to add `email` to the `profiles` table, handle it on new user signup, create a `transfer_requests` table, and configure RLS policies & a security-definer accept function.
-- Updated database client type definitions in `types.ts` to include the `transfer_requests` table and `profiles` email field.
-- Implemented database helpers in `assets.ts` for account validation, request creation, fetching incoming transfers, accepting transfers, and rejecting transfers.
-- Added a pending ownership requests panel at the top of the Media Vault page.
-- Rewrote the ownership transfer handlers in both `vault.tsx` and `search.tsx` to validate recipient email exists in the database and create a pending request instead of direct DB updates.
-- Updated `ResultView.tsx` to display the registered owner's email address and present a prominent Leak Alert banner if the asset status is leaked.
