@@ -44,8 +44,13 @@ export async function runScan(input: {
     leakOwner = searchResult.user_id;
     leakSim = searchResult.sim;
   } else {
-    // New image — register this user as the authorized owner
-    await protectPHash(hash, ownerEmail);
+    // New file — register this user as the authorized owner
+    try {
+      await protectPHash(hash, ownerEmail);
+    } catch (protectErr) {
+      // Non-fatal: if protect fails after search succeeded, we still save to DB as clean
+      console.warn("protectPHash failed (non-fatal):", protectErr);
+    }
   }
 
   // ── Step 3: Check enforcement status ─────────────────────────────────────

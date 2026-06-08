@@ -146,37 +146,79 @@ export async function generatePHash(file: File): Promise<string> {
 
 // ─── Cloud Run API Functions ──────────────────────────────────────────────────
 
+/**
+ * Fetch with automatic retry for cold-start 503s from Cloud Run.
+ * Tries up to `retries` times with a delay between attempts.
+ */
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+  retries = 3,
+  delayMs = 4000,
+): Promise<Response> {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(url, { ...options, signal: AbortSignal.timeout(15000) });
+      // 503 = Cloud Run cold-starting — wait and retry
+      if (res.status === 503 && attempt < retries) {
+        console.warn(`API cold-starting (503), retry ${attempt}/${retries} in ${delayMs}ms…`);
+        await new Promise((r) => setTimeout(r, delayMs));
+        continue;
+      }
+      return res;
+    } catch (err) {
+      if (attempt === retries) throw err;
+      console.warn(`API fetch error, retry ${attempt}/${retries}:`, err);
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  throw new Error("API unreachable after retries");
+}
+
 /** Search blockchain for an existing pHash — returns match + owner + similarity */
 export async function searchPHash(
   phash: string,
 ): Promise<{ match_found: boolean; user_id: string; sim: number }> {
   try {
-    const res = await fetch(`${API_BASE}/search`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ hash: phash }),
-    });
-    if (!res.ok) throw new Error(`Search API ${res.status}`);
+    const res = await fetchWithRetry(
+      `${API_BASE}/search`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hash: phash }),
+      },
+    );
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Search API ${res.status}${text ? ": " + text : ""}`);
+    }
     return await res.json();
   } catch (error) {
     console.error("searchPHash error:", error);
-    return { match_found: false, user_id: "", sim: 0 };
+    // Re-throw so the scan pipeline can show a real error to the user
+    throw error;
   }
 }
 
 /** Register a pHash on-chain under the owner's email */
 export async function protectPHash(phash: string, owner: string): Promise<any> {
   try {
-    const res = await fetch(`${API_BASE}/protect`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ hash: phash, user_id: owner }),
-    });
-    if (!res.ok) throw new Error(`Protect API ${res.status}`);
+    const res = await fetchWithRetry(
+      `${API_BASE}/protect`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hash: phash, user_id: owner }),
+      },
+    );
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Protect API ${res.status}${text ? ": " + text : ""}`);
+    }
     return await res.json();
   } catch (error) {
     console.error("protectPHash error:", error);
-    return null;
+    throw error;
   }
 }
 

@@ -139,7 +139,12 @@ function OverviewPage() {
       setScanning(false);
       setImageUrl(null);
       const msg = err instanceof Error ? err.message : "Scan failed";
-      toast.error(msg);
+      // Give a friendlier message for API cold-start / unreachable errors
+      if (msg.includes("503") || msg.includes("unreachable") || msg.includes("timeout")) {
+        toast.error("⏳ Blockchain API is waking up — please try again in 20 seconds", { duration: 8000 });
+      } else {
+        toast.error(msg);
+      }
     }
   };
 

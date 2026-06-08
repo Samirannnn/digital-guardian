@@ -127,7 +127,12 @@ function SearchPage() {
       });
       setState(apiResult.match_found ? "found" : "not_found");
     } catch (err) {
-      toast.error("Search failed. Please try again.");
+      const msg = err instanceof Error ? err.message : "";
+      if (msg.includes("503") || msg.includes("unreachable") || msg.includes("timeout")) {
+        toast.error("⏳ Blockchain API is waking up — please wait 20 seconds and try again", { duration: 8000 });
+      } else {
+        toast.error("Search failed. Please try again.");
+      }
       setState("idle");
     }
   }, []);

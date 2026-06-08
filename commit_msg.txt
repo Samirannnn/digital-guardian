@@ -1,0 +1,8 @@
+fix: handle Cloud Run cold-start 503 errors in scan pipeline
+
+- Add fetchWithRetry to phash.ts: auto-retries 3x on 503 with 4s delay
+- searchPHash and protectPHash now throw real errors instead of silently returning false
+- scan.functions.ts: protect call is non-fatal (does not block DB save if protect fails)
+- index.tsx: friendly toast when API is waking up (503/timeout/unreachable)
+- BulkUploadZone: shows API waking up error label per file instead of generic error
+- search.tsx: friendly toast for cold-start errors on search page

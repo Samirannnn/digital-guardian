@@ -111,7 +111,19 @@ export function BulkUploadZone({ userId, userEmail, onComplete }: Props) {
     // Step 3: Search + protect
     updateEntry(id, { status: "scanning", progress: 85 });
     try {
-      const searchResult = await searchPHash(hash);
+      let searchResult;
+      try {
+        searchResult = await searchPHash(hash);
+      } catch (apiErr) {
+        const msg = apiErr instanceof Error ? apiErr.message : "";
+        if (msg.includes("503") || msg.includes("unreachable") || msg.includes("timeout")) {
+          updateEntry(id, { error: "API waking up — retry in 20s" });
+        } else {
+          updateEntry(id, { error: "API error" });
+        }
+        updateEntry(id, { status: "error" });
+        return;
+      }
       let scanStatus: "clean" | "leaked" = "clean";
       if (searchResult.match_found) {
         scanStatus = "leaked";
