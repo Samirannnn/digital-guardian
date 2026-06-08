@@ -1,7 +1,0 @@
-fix: use correct app_email database column, fix asset saving, and implement transfer in both vault and search pages
-
-- Fixed asset saving issue where it failed because the column name in the remote database is `app_email` rather than `owner_email`.
-- Updated front-end TypeScript types in `types.ts` to include `app_email` column.
-- Switched all database insert/select queries in bulk upload, scanning, and search routes to use `app_email`.
-- Added database update logic to ownership transfers in both the Vault page and the Search results page.
-- Cleaned up the SQL migration file to focus on cross-user RLS policies and hash index creation.
