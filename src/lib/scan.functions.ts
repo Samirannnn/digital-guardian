@@ -119,6 +119,36 @@ export async function runScan(input: {
         detected_at: leakLocation.timestamp,
       });
     }
+  } else {
+    // ── First-time upload — Save owner's initial location ──────────────────
+    const customCity = input.location
+      ? `${input.location.city}, ${input.location.country}`
+      : "Unknown";
+
+    const leakLocation: LeakLocation = {
+      city: input.location?.city ?? "Unknown",
+      country: input.location?.country ?? "",
+      lat: input.location?.lat ?? 0,
+      lng: input.location?.lng ?? 0,
+      device: "Owner Register",
+      app: "Sentinel Web",
+      confidence: 100,
+      timestamp: scannedAt,
+    };
+
+    leakLocations = [leakLocation];
+
+    await supabase.from("leak_locations").insert({
+      asset_id: asset.id,
+      user_id: user.id,
+      city: customCity,
+      lat: leakLocation.lat,
+      lon: leakLocation.lng,
+      device: leakLocation.device,
+      app: leakLocation.app,
+      confidence: leakLocation.confidence,
+      detected_at: leakLocation.timestamp,
+    });
   }
 
   return {

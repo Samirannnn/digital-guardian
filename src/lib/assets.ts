@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { ScanResult, LeakLocation } from "./dna";
 import { useAuth } from "./auth";
+import { toast } from "sonner";
 
 export type DbAsset = {
   id: string;
@@ -118,8 +119,36 @@ export function useAssetsRealtime() {
         () => qc.invalidateQueries({ queryKey: ["assets", user.id] }),
       )
       .subscribe();
+
+    const chLeak = supabase
+      .channel(`leak-locs-${user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "leak_locations", filter: `user_id=eq.${user.id}` },
+        async (payload: any) => {
+          const { data: asset } = await supabase
+            .from("assets")
+            .select("name, status")
+            .eq("id", payload.new.asset_id)
+            .single();
+
+          if (asset && asset.status === "leaked") {
+            const parts = payload.new.city.split(", ");
+            const displayCity = parts[0];
+            const displayCountry = parts[1] ? `, ${parts[1]}` : "";
+            
+            toast.error(`🚨 Leak Detected: "${asset.name}" has been sighted at ${displayCity}${displayCountry}!`, {
+              duration: 8000,
+            });
+          }
+          qc.invalidateQueries({ queryKey: ["assets", user.id] });
+        }
+      )
+      .subscribe();
+
     return () => {
       supabase.removeChannel(ch);
+      supabase.removeChannel(chLeak);
     };
   }, [user?.id, qc]);
 }

@@ -20,10 +20,8 @@ function MapPage() {
   const { data: assets = [] } = useAssets();
   useAssetsRealtime();
 
-  // Extract all locations only from leaked assets
-  const pins = assets
-    .filter((a) => a.status === "leaked")
-    .flatMap((a) => a.locations);
+  // Extract all locations from all assets
+  const pins = assets.flatMap((a) => a.locations);
 
   return (
     <DashboardLayout>

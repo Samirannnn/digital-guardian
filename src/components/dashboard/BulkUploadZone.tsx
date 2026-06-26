@@ -165,35 +165,51 @@ export function BulkUploadZone({ userId, userEmail, onComplete }: Props) {
         return;
       }
 
-      // Record this leak location on the scanner's new asset row as well
-      if (existing.found) {
+      // Record this leak/owner location on the newly created asset row
+      await supabase.from("leak_locations").insert({
+        asset_id: newAsset.id,
+        user_id: userId,
+        city: customCity,
+        lat: loc.lat,
+        lon: loc.lng,
+        device: existing.found ? "Web Upload" : "Owner Register",
+        app: "Sentinel Web",
+        confidence: 100,
+        detected_at: new Date().toISOString(),
+      });
+
+      updateEntry(id, { status: "done", scanStatus, progress: 100 });
+    } catch (err) {
+      // Even if DB check fails, still save as clean
+      const { data: newAsset } = await supabase
+        .from("assets")
+        .insert({
+          user_id: userId,
+          name: file.name,
+          storage_path: storagePath,
+          size: file.size,
+          hash,
+          status: "clean",
+          block_number: 18_452_193 + Math.floor(Math.random() * 9999),
+          scanned_at: new Date().toISOString(),
+          app_email: userEmail,
+        })
+        .select()
+        .single();
+      
+      if (newAsset) {
         await supabase.from("leak_locations").insert({
           asset_id: newAsset.id,
           user_id: userId,
-          city: customCity,
+          city: `${loc.city}, ${loc.country}`,
           lat: loc.lat,
           lon: loc.lng,
-          device: "Web Upload",
+          device: "Owner Register",
           app: "Sentinel Web",
           confidence: 100,
           detected_at: new Date().toISOString(),
         });
       }
-
-      updateEntry(id, { status: "done", scanStatus, progress: 100 });
-    } catch (err) {
-      // Even if DB check fails, still save as clean
-      await supabase.from("assets").insert({
-        user_id: userId,
-        name: file.name,
-        storage_path: storagePath,
-        size: file.size,
-        hash,
-        status: "clean",
-        block_number: 18_452_193 + Math.floor(Math.random() * 9999),
-        scanned_at: new Date().toISOString(),
-        app_email: userEmail,
-      });
       updateEntry(id, { status: "done", scanStatus: "clean", progress: 100 });
     }
   };
