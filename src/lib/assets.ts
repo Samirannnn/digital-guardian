@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { ScanResult, LeakLocation } from "./dna";
 import { useAuth } from "./auth";
 import { toast } from "sonner";
+import { useNavigate } from "@tanstack/react-router";
 
 export type DbAsset = {
   id: string;
@@ -35,6 +36,10 @@ async function fetchAssets(userId: string): Promise<AssetWithLocations[]> {
   if (error) throw error;
   if (!assets || assets.length === 0) return [];
 
+  // Fetch the current user to get their email
+  const { data: { user } } = await supabase.auth.getUser();
+  const userEmail = user?.email;
+
   const ids = assets.map((a) => a.id);
   const { data: locs } = await supabase
     .from("leak_locations")
@@ -52,25 +57,58 @@ async function fetchAssets(userId: string): Promise<AssetWithLocations[]> {
   );
   const urlMap = new Map(signed.map((s) => [s.id, s.url]));
 
-  return assets.map((a) => ({
-    ...(a as DbAsset),
-    signedUrl: urlMap.get(a.id) ?? null,
-    locations: (locs ?? [])
-      .filter((l) => l.asset_id === a.id)
-      .map<LeakLocation>((l) => {
-        const parts = l.city.split(", ");
-        return {
-          city: parts[0],
-          country: parts[1] || "",
-          lat: l.lat,
-          lng: l.lon,
-          device: l.device,
-          app: l.app,
-          confidence: l.confidence,
-          timestamp: l.detected_at,
-        };
-      }),
-  }));
+  const resultAssets = await Promise.all(
+    assets.map(async (a) => {
+      const isDuplicate = a.status === "leaked" && a.app_email !== userEmail;
+      
+      let locsForAsset: any[] = [];
+      
+      if (isDuplicate) {
+        // Query the oldest asset with this hash (the original owner's asset)
+        const { data: origAssets } = await supabase
+          .from("assets")
+          .select("id")
+          .eq("hash", a.hash)
+          .order("created_at", { ascending: true })
+          .limit(1);
+          
+        if (origAssets && origAssets.length > 0) {
+          // Fetch the owner's initial register location (the oldest location for that asset)
+          const { data: origLocs } = await supabase
+            .from("leak_locations")
+            .select("*")
+            .eq("asset_id", origAssets[0].id)
+            .order("detected_at", { ascending: true })
+            .limit(1);
+            
+          locsForAsset = origLocs ?? [];
+        }
+      } else {
+        // Owner or clean asset — return all locations
+        locsForAsset = (locs ?? []).filter((l) => l.asset_id === a.id);
+      }
+
+      return {
+        ...(a as DbAsset),
+        signedUrl: urlMap.get(a.id) ?? null,
+        locations: locsForAsset.map<LeakLocation>((l) => {
+          const parts = l.city.split(", ");
+          return {
+            city: parts[0],
+            country: parts[1] || "",
+            lat: l.lat,
+            lng: l.lon,
+            device: l.device,
+            app: l.app,
+            confidence: l.confidence,
+            timestamp: l.detected_at,
+          };
+        }),
+      };
+    })
+  );
+
+  return resultAssets;
 }
 
 export function useAssets() {
@@ -109,6 +147,7 @@ export function toScanResult(a: AssetWithLocations): ScanResult {
 export function useAssetsRealtime() {
   const qc = useQueryClient();
   const { user } = useAuth();
+  const navigate = useNavigate();
   useEffect(() => {
     if (!user?.id) return;
     const ch = supabase
@@ -139,6 +178,10 @@ export function useAssetsRealtime() {
             
             toast.error(`🚨 Leak Detected: "${asset.name}" has been sighted at ${displayCity}${displayCountry}!`, {
               duration: 8000,
+              action: {
+                label: "View Map",
+                onClick: () => navigate({ to: "/map" }),
+              },
             });
           }
           qc.invalidateQueries({ queryKey: ["assets", user.id] });
@@ -150,7 +193,7 @@ export function useAssetsRealtime() {
       supabase.removeChannel(ch);
       supabase.removeChannel(chLeak);
     };
-  }, [user?.id, qc]);
+  }, [user?.id, qc, navigate]);
 }
 
 // Upload a File to the user's folder in the assets bucket
