@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { ShieldCheck, ShieldAlert, MapPin, Smartphone, MessageCircle, Hash, X } from "lucide-react";
+import { ShieldCheck, ShieldAlert, MapPin, Smartphone, MessageCircle, Hash, X, Trash2 } from "lucide-react";
 import type { ScanResult } from "@/lib/dna";
 import { WorldMap } from "./WorldMap";
 
@@ -9,6 +9,8 @@ type Props = {
   ownerEmail?: string | null;
   fileName?: string;
   onClose: () => void;
+  isOwner?: boolean;
+  onWipe?: (lat: number, lng: number) => Promise<void>;
 };
 
 function getFileType(fileName: string) {
@@ -20,7 +22,7 @@ function getFileType(fileName: string) {
   return "other";
 }
 
-export function ResultView({ imageUrl, result, ownerEmail, fileName, onClose }: Props) {
+export function ResultView({ imageUrl, result, ownerEmail, fileName, onClose, isOwner, onWipe }: Props) {
   const leaked = result.status === "leaked";
   const fileType = fileName ? getFileType(fileName) : "image";
 
@@ -158,7 +160,7 @@ export function ResultView({ imageUrl, result, ownerEmail, fileName, onClose }: 
                   initial={{ opacity: 0, x: 10 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: 0.1 + i * 0.08 }}
-                  className="p-4 flex items-start gap-3 hover:bg-white/[0.03]"
+                  className="p-4 flex items-center gap-3 hover:bg-white/[0.03]"
                 >
                   <div className="grid h-9 w-9 place-items-center rounded-lg bg-crimson/15 text-crimson shrink-0">
                     <MapPin size={15} />
@@ -170,7 +172,11 @@ export function ResultView({ imageUrl, result, ownerEmail, fileName, onClose }: 
                         {loc.confidence}% match
                       </span>
                     </div>
-                    <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground font-mono">
+                    {/* Display coordinates explicitly */}
+                    <div className="mt-0.5 text-[10px] font-mono text-primary/70">
+                      GPS: {loc.lat.toFixed(4)}, {loc.lng.toFixed(4)}
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground font-mono">
                       <span className="flex items-center gap-1">
                         <Smartphone size={11} /> {loc.device}
                       </span>
@@ -179,6 +185,22 @@ export function ResultView({ imageUrl, result, ownerEmail, fileName, onClose }: 
                       </span>
                     </div>
                   </div>
+                  {/* Remove / Wipe button for owners */}
+                  {isOwner && onWipe && (
+                    <button
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        if (confirm(`Are you sure you want to remove this asset copy at coordinates [${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}]? This will wipe the duplicate asset from the other device/user.`)) {
+                          await onWipe(loc.lat, loc.lng);
+                        }
+                      }}
+                      title="Remove from Device"
+                      className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-semibold bg-crimson/15 hover:bg-crimson/30 border border-crimson/35 text-crimson hover:text-white transition-all scale-[0.98] hover:scale-100 active:scale-[0.96]"
+                    >
+                      <Trash2 size={11} />
+                      Remove
+                    </button>
+                  )}
                 </motion.div>
               ))}
             </div>

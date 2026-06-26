@@ -26,6 +26,7 @@ import {
   fetchPendingTransfers,
   acceptTransfer,
   rejectTransfer,
+  wipeRemoteAsset,
   type AssetWithLocations,
   type TransferRequestWithAsset
 } from "@/lib/assets";
@@ -91,6 +92,23 @@ function VaultPage() {
       } finally {
         setIsDeleting(false);
       }
+    }
+  };
+
+  const handleWipe = async (lat: number, lng: number) => {
+    if (!selectedAsset || !user?.id) return;
+    try {
+      const res = await wipeRemoteAsset(user.id, selectedAsset.hash, lat, lng);
+      if (res.success) {
+        toast.success("Remote copy successfully removed from other devices");
+        refetch();
+        setSelectedAsset(null);
+      } else {
+        toast.error(res.message || "Failed to remove asset remote copy");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("An error occurred during remote asset removal");
     }
   };
 
@@ -295,6 +313,8 @@ function VaultPage() {
               ownerEmail={selectedAsset.app_email}
               fileName={selectedAsset.name}
               onClose={() => setSelectedAsset(null)}
+              isOwner={user ? selectedAsset.user_id === user.id : false}
+              onWipe={handleWipe}
             />
           </AnimatePresence>
         ) : (

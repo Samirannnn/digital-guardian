@@ -18,6 +18,12 @@ export async function runScan(input: {
     storagePath: string;
     file: File;
   };
+  location?: {
+    lat: number;
+    lng: number;
+    city: string;
+    country: string;
+  };
 }): Promise<ScanResult & { assetId: string }> {
   const {
     data: { user },
@@ -64,14 +70,16 @@ export async function runScan(input: {
     // ── Asset already exists — this is a duplicate upload ──────────────────
     status = "leaked";
 
+    const customCity = input.location
+      ? `${input.location.city}, ${input.location.country}`
+      : undefined;
+
     // Build a location entry for this new detection
-    // Use a real city from existing locations if available, otherwise Unknown
-    const refLoc = existing.locations[0];
     const leakLocation: LeakLocation = {
-      city: refLoc?.city ?? "Unknown",
-      country: refLoc?.country ?? "",
-      lat: refLoc?.lat ?? 0,
-      lng: refLoc?.lng ?? 0,
+      city: input.location?.city ?? "Unknown",
+      country: input.location?.country ?? "",
+      lat: input.location?.lat ?? 0,
+      lng: input.location?.lng ?? 0,
       device: "Web Upload",
       app: "Sentinel Web",
       confidence: 100,
@@ -80,11 +88,13 @@ export async function runScan(input: {
 
     leakLocations = [leakLocation, ...existing.locations];
 
-    // Persist this detection as a leak_location
+    // Persist this detection as a leak_location for the current scan
     await supabase.from("leak_locations").insert({
       asset_id: asset.id,
       user_id: user.id,
-      city: leakLocation.city,
+      city: customCity ?? (existing.locations[0]?.city 
+        ? `${existing.locations[0].city}, ${existing.locations[0].country}` 
+        : "Unknown"),
       lat: leakLocation.lat,
       lon: leakLocation.lng,
       device: leakLocation.device,
@@ -92,6 +102,23 @@ export async function runScan(input: {
       confidence: leakLocation.confidence,
       detected_at: leakLocation.timestamp,
     });
+
+    // Also record this leak detection on the original owner's asset so it updates their map
+    if (existing.assetId && existing.ownerUserId) {
+      await supabase.from("leak_locations").insert({
+        asset_id: existing.assetId,
+        user_id: existing.ownerUserId,
+        city: customCity ?? (existing.locations[0]?.city 
+          ? `${existing.locations[0].city}, ${existing.locations[0].country}` 
+          : "Unknown"),
+        lat: leakLocation.lat,
+        lon: leakLocation.lng,
+        device: leakLocation.device,
+        app: leakLocation.app,
+        confidence: leakLocation.confidence,
+        detected_at: leakLocation.timestamp,
+      });
+    }
   }
 
   return {

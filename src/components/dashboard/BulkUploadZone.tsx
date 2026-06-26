@@ -18,6 +18,8 @@ import { toast } from "sonner";
 import { uploadAssetFile, lookupHashInDB } from "@/lib/assets";
 import { getFileHash } from "@/lib/phash";
 import { supabase } from "@/integrations/supabase/client";
+import { LocationDialog } from "@/components/dashboard/LocationDialog";
+import { type GeoLocation } from "@/lib/geo";
 
 type FileStatus = "queued" | "hashing" | "uploading" | "scanning" | "done" | "error";
 
@@ -58,6 +60,7 @@ export function BulkUploadZone({ userId, userEmail, onComplete }: Props) {
   const [drag, setDrag] = useState(false);
   const [queue, setQueue] = useState<FileEntry[]>([]);
   const [running, setRunning] = useState(false);
+  const [locationDialogOpen, setLocationDialogOpen] = useState(false);
 
   const updateEntry = (id: string, patch: Partial<FileEntry>) => {
     setQueue((q) => q.map((e) => (e.id === id ? { ...e, ...patch } : e)));
@@ -86,7 +89,7 @@ export function BulkUploadZone({ userId, userEmail, onComplete }: Props) {
     setQueue((q) => q.filter((e) => !["done", "error"].includes(e.status)));
   };
 
-  const processEntry = async (entry: FileEntry) => {
+  const processEntry = async (entry: FileEntry, loc: GeoLocation) => {
     const { id, file } = entry;
 
     // ── Step 1: Fingerprint ───────────────────────────────────────────────────
@@ -119,16 +122,18 @@ export function BulkUploadZone({ userId, userEmail, onComplete }: Props) {
     try {
       const existing = await lookupHashInDB(hash);
 
+      const customCity = `${loc.city}, ${loc.country}`;
+
       if (existing.found) {
         scanStatus = "leaked";
         // Record this as a detected location on the owner's asset
-        if (existing.assetId) {
+        if (existing.assetId && existing.ownerUserId) {
           await supabase.from("leak_locations").insert({
             asset_id: existing.assetId,
-            user_id: userId,
-            city: "Unknown",
-            lat: 0,
-            lon: 0,
+            user_id: existing.ownerUserId,
+            city: customCity,
+            lat: loc.lat,
+            lon: loc.lng,
             device: "Web Upload",
             app: "Sentinel Web",
             confidence: 100,
@@ -139,21 +144,40 @@ export function BulkUploadZone({ userId, userEmail, onComplete }: Props) {
 
       // Save to DB
       const blockNumber = 18_452_193 + Math.floor(Math.random() * 9999);
-      const { error: dbErr } = await supabase.from("assets").insert({
-        user_id: userId,
-        name: file.name,
-        storage_path: storagePath,
-        size: file.size,
-        hash,
-        status: scanStatus,
-        block_number: blockNumber,
-        scanned_at: new Date().toISOString(),
-        app_email: existing.found ? (existing.ownerEmail ?? null) : userEmail,
-      });
+      const { data: newAsset, error: dbErr } = await supabase
+        .from("assets")
+        .insert({
+          user_id: userId,
+          name: file.name,
+          storage_path: storagePath,
+          size: file.size,
+          hash,
+          status: scanStatus,
+          block_number: blockNumber,
+          scanned_at: new Date().toISOString(),
+          app_email: existing.found ? (existing.ownerEmail ?? null) : userEmail,
+        })
+        .select()
+        .single();
 
-      if (dbErr) {
+      if (dbErr || !newAsset) {
         updateEntry(id, { status: "error", error: "Database save failed" });
         return;
+      }
+
+      // Record this leak location on the scanner's new asset row as well
+      if (existing.found) {
+        await supabase.from("leak_locations").insert({
+          asset_id: newAsset.id,
+          user_id: userId,
+          city: customCity,
+          lat: loc.lat,
+          lon: loc.lng,
+          device: "Web Upload",
+          app: "Sentinel Web",
+          confidence: 100,
+          detected_at: new Date().toISOString(),
+        });
       }
 
       updateEntry(id, { status: "done", scanStatus, progress: 100 });
@@ -174,7 +198,13 @@ export function BulkUploadZone({ userId, userEmail, onComplete }: Props) {
     }
   };
 
-  const startProcessing = async () => {
+  const startProcessing = () => {
+    const pending = queue.filter((e) => e.status === "queued");
+    if (pending.length === 0) return;
+    setLocationDialogOpen(true);
+  };
+
+  const executeProcessing = async (loc: GeoLocation) => {
     if (running) return;
     const pending = queue.filter((e) => e.status === "queued");
     if (pending.length === 0) return;
@@ -185,7 +215,7 @@ export function BulkUploadZone({ userId, userEmail, onComplete }: Props) {
     const worker = async () => {
       while (idx < pending.length) {
         const entry = pending[idx++];
-        await processEntry(entry);
+        await processEntry(entry, loc);
       }
     };
 
@@ -380,6 +410,16 @@ export function BulkUploadZone({ userId, userEmail, onComplete }: Props) {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <LocationDialog
+        open={locationDialogOpen}
+        onOpenChange={setLocationDialogOpen}
+        onConfirm={(loc) => {
+          setLocationDialogOpen(false);
+          executeProcessing(loc);
+        }}
+        onCancel={() => setLocationDialogOpen(false)}
+      />
     </div>
   );
 }

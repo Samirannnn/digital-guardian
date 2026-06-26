@@ -6,6 +6,7 @@ import { useAuth } from "./auth";
 
 export type DbAsset = {
   id: string;
+  user_id: string;
   name: string;
   storage_path: string;
   size: number;
@@ -55,16 +56,19 @@ async function fetchAssets(userId: string): Promise<AssetWithLocations[]> {
     signedUrl: urlMap.get(a.id) ?? null,
     locations: (locs ?? [])
       .filter((l) => l.asset_id === a.id)
-      .map<LeakLocation>((l) => ({
-        city: l.city,
-        country: "",
-        lat: l.lat,
-        lng: l.lon,
-        device: l.device,
-        app: l.app,
-        confidence: l.confidence,
-        timestamp: l.detected_at,
-      })),
+      .map<LeakLocation>((l) => {
+        const parts = l.city.split(", ");
+        return {
+          city: parts[0],
+          country: parts[1] || "",
+          lat: l.lat,
+          lng: l.lon,
+          device: l.device,
+          app: l.app,
+          confidence: l.confidence,
+          timestamp: l.detected_at,
+        };
+      }),
   }));
 }
 
@@ -209,16 +213,19 @@ export async function lookupHashInDB(hash: string): Promise<HashLookupResult> {
     .select("*")
     .in("asset_id", allIds);
 
-  const locations: LeakLocation[] = (locs ?? []).map((l) => ({
-    city: l.city,
-    country: "",
-    lat: l.lat,
-    lng: l.lon,
-    device: l.device,
-    app: l.app,
-    confidence: l.confidence,
-    timestamp: l.detected_at,
-  }));
+  const locations: LeakLocation[] = (locs ?? []).map((l) => {
+    const parts = l.city.split(", ");
+    return {
+      city: parts[0],
+      country: parts[1] || "",
+      lat: l.lat,
+      lng: l.lon,
+      device: l.device,
+      app: l.app,
+      confidence: l.confidence,
+      timestamp: l.detected_at,
+    };
+  });
 
   return {
     found: true,
@@ -396,5 +403,64 @@ export async function rejectTransfer(requestId: string): Promise<{ success: bool
     .eq("id", requestId);
 
   if (error) return { success: false, message: error.message };
+  return { success: true };
+}
+
+/**
+ * Remotely wipes / removes a leaked asset copy from other devices/users.
+ * Deletes the leak location record and the duplicate asset.
+ */
+export async function wipeRemoteAsset(
+  ownerUserId: string,
+  assetHash: string,
+  lat: number,
+  lng: number
+): Promise<{ success: boolean; message?: string }> {
+  // 1. Find the leak location for the owner's asset
+  const { data: ownerLocs, error: locErr } = await supabase
+    .from("leak_locations")
+    .select("id")
+    .eq("user_id", ownerUserId)
+    .eq("lat", lat)
+    .eq("lon", lng);
+
+  if (locErr) return { success: false, message: locErr.message };
+
+  if (ownerLocs && ownerLocs.length > 0) {
+    // Delete the owner's leak location pin
+    const { error: delLocErr } = await supabase
+      .from("leak_locations")
+      .delete()
+      .eq("id", ownerLocs[0].id);
+      
+    if (delLocErr) return { success: false, message: delLocErr.message };
+  }
+
+  // 2. Find and delete the duplicate asset(s) and their leak locations
+  // Duplicate assets have the same hash but belong to other users
+  const { data: duplicates, error: dupErr } = await supabase
+    .from("assets")
+    .select("id, storage_path")
+    .eq("hash", assetHash)
+    .neq("user_id", ownerUserId);
+
+  if (dupErr) return { success: false, message: dupErr.message };
+
+  if (duplicates && duplicates.length > 0) {
+    for (const dup of duplicates) {
+      // Delete storage file
+      if (dup.storage_path) {
+        const { error: storageError } = await supabase.storage
+          .from("assets")
+          .remove([dup.storage_path]);
+        if (storageError) console.error("Failed to delete duplicate storage file:", storageError);
+      }
+      // Delete leak locations for the duplicate
+      await supabase.from("leak_locations").delete().eq("asset_id", dup.id);
+      // Delete the duplicate asset itself
+      await supabase.from("assets").delete().eq("id", dup.id);
+    }
+  }
+
   return { success: true };
 }

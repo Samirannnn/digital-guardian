@@ -23,8 +23,11 @@ import {
   useAssetsRealtime,
   useRefreshAssets,
   uploadAssetFile,
+  wipeRemoteAsset,
 } from "@/lib/assets";
 import { runScan } from "@/lib/scan.functions";
+import { LocationDialog } from "@/components/dashboard/LocationDialog";
+import { type GeoLocation } from "@/lib/geo";
 
 export const Route = createFileRoute("/")(  {
   head: () => ({
@@ -67,6 +70,8 @@ function OverviewPage() {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [result, setResult] = useState<ScanResult | null>(null);
   const [leakAlert, setLeakAlert] = useState<{ fileName: string; result: ScanResult } | null>(null);
+  const [locationDialogOpen, setLocationDialogOpen] = useState(false);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
 
   const { data: items = [] } = useAssets();
   useAssetsRealtime();
@@ -92,7 +97,12 @@ function OverviewPage() {
     return () => clearInterval(t);
   }, [scanning]);
 
-  const handleFile = async (file: File) => {
+  const handleFile = (file: File) => {
+    setPendingFile(file);
+    setLocationDialogOpen(true);
+  };
+
+  const executeScan = async (file: File, loc: GeoLocation) => {
     if (!user) return;
     const url = URL.createObjectURL(file);
     setImageUrl(url);
@@ -111,6 +121,7 @@ function OverviewPage() {
           storagePath,
           file,
         },
+        location: loc,
       });
 
       setProgress(100);
@@ -164,6 +175,24 @@ function OverviewPage() {
       </div>
     );
   }
+
+  const handleWipe = async (lat: number, lng: number) => {
+    if (!result || !user?.id) return;
+    try {
+      const res = await wipeRemoteAsset(user.id, result.hash, lat, lng);
+      if (res.success) {
+        toast.success("Remote copy successfully removed from other devices");
+        refresh();
+        setResult(null);
+        setImageUrl(null);
+      } else {
+        toast.error(res.message || "Failed to remove asset remote copy");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("An error occurred during remote asset removal");
+    }
+  };
 
   const displayName = profile?.display_name || user?.email?.split("@")[0] || "Creator";
 
@@ -288,6 +317,8 @@ function OverviewPage() {
                       setResult(null);
                       setImageUrl(null);
                     }}
+                    isOwner={true}
+                    onWipe={handleWipe}
                   />
                 ) : (
                   <motion.div
@@ -311,6 +342,22 @@ function OverviewPage() {
             </motion.div>
           )}
         </AnimatePresence>
+
+        <LocationDialog
+          open={locationDialogOpen}
+          onOpenChange={setLocationDialogOpen}
+          onConfirm={(loc) => {
+            setLocationDialogOpen(false);
+            if (pendingFile) {
+              executeScan(pendingFile, loc);
+              setPendingFile(null);
+            }
+          }}
+          onCancel={() => {
+            setLocationDialogOpen(false);
+            setPendingFile(null);
+          }}
+        />
       </div>
     </DashboardLayout>
   );
