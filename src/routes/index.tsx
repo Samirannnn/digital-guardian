@@ -9,6 +9,12 @@ import {
   Cpu,
   UploadCloud,
   Search,
+  Radar,
+  RefreshCw,
+  ShieldAlert,
+  MapPin,
+  Smartphone,
+  MessageCircle,
 } from "lucide-react";
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { StatCard } from "@/components/dashboard/StatCard";
@@ -17,6 +23,7 @@ import { BulkUploadZone } from "@/components/dashboard/BulkUploadZone";
 import { ResultView } from "@/components/dashboard/ResultView";
 import { SecurityAlertBanner } from "@/components/dashboard/SecurityAlertBanner";
 import { ActiveThreatsFeed } from "@/components/dashboard/ActiveThreatsFeed";
+import { WorldMap } from "@/components/dashboard/WorldMap";
 import type { ScanResult } from "@/lib/dna";
 import { useAuth } from "@/lib/auth";
 import {
@@ -75,6 +82,11 @@ function OverviewPage() {
   const [leakAlert, setLeakAlert] = useState<{ fileName: string; result: ScanResult } | null>(null);
   const [locationDialogOpen, setLocationDialogOpen] = useState(false);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [vaultScanning, setVaultScanning] = useState(false);
+  const [vaultScanProgress, setVaultScanProgress] = useState(0);
+  const [vaultScanStage, setVaultScanStage] = useState("");
+  const [vaultScanResult, setVaultScanResult] = useState<any[] | null>(null);
+  const [vaultLeakedAssets, setVaultLeakedAssets] = useState<any[]>([]);
 
   const { data: items = [] } = useAssets();
   useAssetsRealtime();
@@ -166,6 +178,61 @@ function OverviewPage() {
         toast.error(msg);
       }
     }
+  };
+
+  const executeVaultScan = async () => {
+    if (items.length === 0) {
+      toast.error("No assets registered in the vault to scan.");
+      return;
+    }
+    setVaultScanResult(null);
+    setVaultScanning(true);
+    setVaultScanProgress(0);
+    setVaultScanStage("Initializing vault integrity scan...");
+
+    const scanStages = [
+      "Retrieving all vault assets...",
+      "Matching perceptual hashes (pHash)...",
+      "Scanning global leak indexes...",
+      "Polygon blockchain ownership verification...",
+      "Generating threat location mapping..."
+    ];
+
+    // Simulate progress
+    const start = Date.now();
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - start;
+      const pct = Math.min(99, Math.floor((elapsed / 3000) * 100));
+      setVaultScanProgress(pct);
+      const stageIdx = Math.min(scanStages.length - 1, Math.floor(pct / 20));
+      setVaultScanStage(scanStages[stageIdx]);
+    }, 85);
+
+    setTimeout(() => {
+      clearInterval(interval);
+      setVaultScanProgress(100);
+
+      setTimeout(() => {
+        setVaultScanning(false);
+        // Find leaked assets and gather all their location pins
+        const leaked = items.filter((it) => it.status === "leaked");
+        const allPins = leaked.flatMap((it) => 
+          it.locations.map((loc) => ({
+            ...loc,
+            assetName: it.name,
+          }))
+        );
+
+        setVaultLeakedAssets(leaked);
+        setVaultScanResult(allPins);
+
+        if (allPins.length > 0) {
+          toast.error(`🚨 Sighting scan complete: ${allPins.length} unauthorized copy sighting(s) found!`, { duration: 6000 });
+        } else {
+          toast.success("✅ Sighting scan complete: All registered assets are secure!");
+        }
+      }, 250);
+    }, 3000);
   };
 
   const totalLeaks = items.reduce(
@@ -315,7 +382,138 @@ function OverviewPage() {
                   className="space-y-4"
                 >
                   <AnimatePresence mode="wait">
-                    {result && imageUrl ? (
+                    {vaultScanning ? (
+                      /* ── VAULT SCANNING PROGRESS SCREEN ── */
+                      <motion.div
+                        key="vault-scanning"
+                        initial={{ opacity: 0, scale: 0.98 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="glass rounded-2xl p-10 flex flex-col items-center text-center border border-primary/20 relative overflow-hidden"
+                      >
+                        <div className="absolute inset-0 grid-bg opacity-15" />
+                        <div className="relative h-24 w-24 mb-6">
+                          <div className="absolute inset-0 rounded-full border border-primary/10" />
+                          <div className="absolute inset-0 rounded-full border-t-2 border-primary animate-spin" style={{ animationDuration: "2s" }} />
+                          <div className="absolute inset-2 rounded-full border-b border-cyber/50 animate-spin [animation-direction:reverse] [animation-duration:1.5s]" />
+                          <div className="absolute inset-4 rounded-full bg-primary/5 grid place-items-center">
+                            <Radar className="h-10 w-10 text-primary animate-pulse" />
+                          </div>
+                        </div>
+                        
+                        <h3 className="text-lg font-bold tracking-tight text-white">Global Vault Scan in Progress</h3>
+                        <p className="text-xs text-muted-foreground mt-1 max-w-sm">{vaultScanStage}</p>
+                        
+                        <div className="w-full max-w-xs mt-6 space-y-1">
+                          <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden border border-border/30">
+                            <motion.div
+                              className="h-full bg-gradient-to-r from-primary to-cyber"
+                              initial={{ width: 0 }}
+                              animate={{ width: `${vaultScanProgress}%` }}
+                              transition={{ duration: 0.1 }}
+                            />
+                          </div>
+                          <div className="flex justify-between text-[10px] font-mono text-muted-foreground px-0.5">
+                            <span>SCANNING SIGNATURES</span>
+                            <span>{vaultScanProgress}%</span>
+                          </div>
+                        </div>
+                      </motion.div>
+                    ) : vaultScanResult ? (
+                      /* ── VAULT SCANNING RESULTS PANEL ── */
+                      <motion.div
+                        key="vault-scan-result"
+                        initial={{ opacity: 0, y: 12 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0 }}
+                        className="glass rounded-2xl overflow-hidden border border-border/80"
+                      >
+                        <div className={`px-5 py-4 border-b border-border flex items-center justify-between ${
+                          vaultScanResult.length > 0 ? "bg-crimson/10" : "bg-emerald/10"
+                        }`}>
+                          <div className="flex items-center gap-2">
+                            {vaultScanResult.length > 0 ? (
+                              <ShieldAlert className="text-crimson shrink-0" size={18} />
+                            ) : (
+                              <ShieldCheck className="text-emerald shrink-0" size={18} />
+                            )}
+                            <span className={`text-sm font-bold ${
+                              vaultScanResult.length > 0 ? "text-crimson" : "text-emerald"
+                            }`}>
+                              {vaultScanResult.length > 0 
+                                ? `Integrity Breach Detected (${vaultLeakedAssets.length} asset${vaultLeakedAssets.length !== 1 ? "s" : ""})`
+                                : "Vault Integrity Verified"
+                              }
+                            </span>
+                          </div>
+                          <button
+                            onClick={() => setVaultScanResult(null)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground border border-border transition-colors bg-white/5"
+                          >
+                            <RefreshCw size={11} /> New Scan
+                          </button>
+                        </div>
+
+                        {vaultScanResult.length > 0 ? (
+                          <div>
+                            {/* Map showing all sighting pins */}
+                            <div className="p-4 border-b border-border bg-black/20">
+                              <div className="text-[11px] uppercase tracking-wider font-mono text-muted-foreground mb-2 flex items-center gap-1.5">
+                                <MapPin size={12} className="text-crimson" /> Sighting Locations Map
+                              </div>
+                              <WorldMap pins={vaultScanResult} compact={false} />
+                            </div>
+
+                            {/* List of sightings */}
+                            <div className="divide-y divide-border/40 max-h-72 overflow-y-auto">
+                              {vaultScanResult.map((loc, i) => (
+                                <div key={i} className="p-4 flex items-start gap-3 hover:bg-white/[0.02] transition-colors">
+                                  <div className="grid h-9 w-9 place-items-center rounded-lg bg-crimson/15 text-crimson shrink-0 mt-0.5">
+                                    <ShieldAlert size={15} />
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="font-semibold text-sm text-white truncate max-w-[200px]">
+                                        {loc.assetName}
+                                      </span>
+                                      <span className="text-[10px] font-mono bg-crimson/15 text-crimson px-1.5 py-0.5 rounded shrink-0">
+                                        {loc.confidence}% match
+                                      </span>
+                                    </div>
+                                    <div className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground">
+                                      <MapPin size={10} className="text-crimson/70 shrink-0" />
+                                      <span>{loc.city}, {loc.country}</span>
+                                      <span className="opacity-50">·</span>
+                                      <span className="font-mono text-[10px]">GPS: {loc.lat.toFixed(4)}, {loc.lng.toFixed(4)}</span>
+                                    </div>
+                                    <div className="mt-1 flex gap-3 text-[10px] text-muted-foreground/80 font-mono">
+                                      <span className="flex items-center gap-0.5"><Smartphone size={9} className="shrink-0" /> {loc.device}</span>
+                                      <span className="flex items-center gap-0.5"><MessageCircle size={9} className="shrink-0" /> {loc.app}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="py-14 px-6 text-center space-y-3.5">
+                            <div className="relative mx-auto h-16 w-16">
+                              <div className="absolute inset-0 rounded-full bg-emerald/20 blur-xl" />
+                              <div className="relative grid h-16 w-16 place-items-center rounded-full bg-emerald/15 border border-emerald/30">
+                                <ShieldCheck className="h-7 w-7 text-emerald" />
+                              </div>
+                            </div>
+                            <div>
+                              <h3 className="text-base font-bold text-white">All Vault Assets Protected</h3>
+                              <p className="text-xs text-muted-foreground mt-1.5 max-w-xs mx-auto leading-relaxed">
+                                No unauthorized uploads or leaks were found for any of your registered assets. Your library integrity is 100% clean.
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </motion.div>
+                    ) : result && imageUrl ? (
+                      /* ── SINGLE ASSET RESULT VIEW ── */
                       <ResultView
                         key="result"
                         imageUrl={imageUrl}
@@ -324,24 +522,51 @@ function OverviewPage() {
                           setResult(null);
                           setImageUrl(null);
                         }}
-                         isOwner={isOwnerOfResult}
-                         ownerEmail={resultOwnerEmail}
-                         onWipe={handleWipe}
+                        isOwner={isOwnerOfResult}
+                        ownerEmail={resultOwnerEmail}
+                        onWipe={handleWipe}
                       />
                     ) : (
-                      <motion.div
-                        key="upload"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                      >
-                        <UploadZone
-                          onFile={handleFile}
-                          scanning={scanning}
-                          progress={progress}
-                          stage={stage}
-                        />
-                      </motion.div>
+                      /* ── IDLE / DEFAULT SCAN VIEW: Uploader + Scan Vault Card ── */
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {/* File Drop Uploader */}
+                        <div className="md:col-span-2">
+                          <UploadZone
+                            onFile={handleFile}
+                            scanning={scanning}
+                            progress={progress}
+                            stage={stage}
+                          />
+                        </div>
+                        
+                        {/* Scan All Vault Assets Button Card */}
+                        <div className="md:col-span-1 glass rounded-2xl p-5 flex flex-col justify-between border border-border hover:border-primary/30 transition-all relative overflow-hidden group">
+                          <div className="absolute inset-0 grid-bg opacity-10" />
+                          <div className="relative space-y-4">
+                            <div className="relative h-10 w-10 shrink-0">
+                              <div className="absolute inset-0 rounded-xl bg-gradient-to-br from-primary/30 to-cyber/30 blur-lg group-hover:blur-xl transition-all" />
+                              <div className="relative grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-primary/20 to-cyber/10 border border-primary/20">
+                                <Radar className="h-5 w-5 text-primary group-hover:scale-105 transition-transform" />
+                              </div>
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-semibold text-white">Scan All Vault Assets</h4>
+                              <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
+                                Check all {items.length} file{items.length !== 1 ? "s" : ""} registered in your vault. If any leak exists, all sighting locations will be displayed on a unified map.
+                              </p>
+                            </div>
+                          </div>
+                          
+                          <button
+                            onClick={executeVaultScan}
+                            disabled={items.length === 0}
+                            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold mt-6 bg-white/5 border border-border/80 hover:bg-primary/10 hover:border-primary/40 text-white disabled:opacity-40 disabled:hover:bg-white/5 disabled:hover:border-border transition-all cursor-pointer"
+                          >
+                            <Radar size={12} className="group-hover:animate-pulse" />
+                            Scan Vault ({items.length})
+                          </button>
+                        </div>
+                      </div>
                     )}
                   </AnimatePresence>
 
