@@ -166,5 +166,6 @@ export async function runScan(input: {
     locations: leakLocations,
     isOwner: !isDuplicateUpload,
     ownerEmail: isDuplicateUpload ? existing.ownerEmail : ownerEmail,
+    isBlurred: existing.isBlurred,
   };
 }

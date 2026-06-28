@@ -18,6 +18,7 @@ import {
   Lock,
   Copy,
   Mail,
+  EyeOff,
 } from "lucide-react";
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { WorldMap } from "@/components/dashboard/WorldMap";
@@ -330,10 +331,29 @@ function SearchPage() {
                   <div className="p-5 border-b sm:border-b-0 sm:border-r border-border space-y-4">
                     {previewUrl && (
                       <div className="relative aspect-[4/3] rounded-xl overflow-hidden bg-black/40">
-                        <img src={previewUrl} alt={file?.name} className="h-full w-full object-cover" />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+                        <img
+                          src={previewUrl}
+                          alt={file?.name}
+                          className={`h-full w-full object-cover transition-all duration-300 ${
+                            state === "found" && !isCurrentUserOwner && searchResult.isBlurred
+                              ? "filter blur-xl brightness-50"
+                              : ""
+                          }`}
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent pointer-events-none" />
+                        
+                        {state === "found" && !isCurrentUserOwner && searchResult.isBlurred && (
+                          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm flex flex-col items-center justify-center p-4 text-center z-10">
+                            <EyeOff className="h-6 w-6 text-crimson mb-1.5 animate-pulse" />
+                            <span className="text-[10px] font-bold text-white uppercase tracking-wider">Preview Restricted</span>
+                            <span className="text-[9px] text-muted-foreground mt-1 max-w-[180px] leading-relaxed">
+                              The verified owner has blurred this asset.
+                            </span>
+                          </div>
+                        )}
+                        
                         {["top-2 left-2 border-l-2 border-t-2", "top-2 right-2 border-r-2 border-t-2", "bottom-2 left-2 border-l-2 border-b-2", "bottom-2 right-2 border-r-2 border-b-2"].map((c) => (
-                          <div key={c} className={`absolute h-4 w-4 border-primary/70 ${c}`} />
+                          <div key={c} className={`absolute h-4 w-4 border-primary/70 ${c} pointer-events-none`} />
                         ))}
                       </div>
                     )}

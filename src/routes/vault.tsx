@@ -120,6 +120,7 @@ function VaultPage() {
       const result = await enforceBlur(asset.hash, user.email);
       if (result.success) {
         toast.success(`🛡️ Blur enforcement activated for "${asset.name}"`);
+        refetch();
       } else {
         toast.error("Blur enforcement failed — you may not be the registered owner.");
       }
@@ -459,25 +460,40 @@ function VaultCard({
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/30" />
 
         {/* Status badge */}
-        <div
-          className={`absolute top-2 left-2 flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold backdrop-blur-md border ${
-            leaked
-              ? "bg-crimson/20 text-crimson border-crimson/40"
-              : "bg-emerald/20 text-emerald border-emerald/40"
-          }`}
-        >
-          {leaked ? <AlertOctagon size={10} /> : <ShieldCheck size={10} />}
-          {leaked ? "Compromised" : "Protected"}
+        <div className="absolute top-2 left-2 flex flex-col gap-1 items-start z-10">
+          <div
+            className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold backdrop-blur-md border ${
+              leaked
+                ? "bg-crimson/20 text-crimson border-crimson/40"
+                : "bg-emerald/20 text-emerald border-emerald/40"
+            }`}
+          >
+            {leaked ? <AlertOctagon size={10} /> : <ShieldCheck size={10} />}
+            {leaked ? "Compromised" : "Protected"}
+          </div>
+
+          {asset.isBlurred && (
+            <div className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold bg-crimson/95 text-white backdrop-blur-md border border-crimson/40">
+              <EyeOff size={10} />
+              Censored
+            </div>
+          )}
         </div>
 
-        {/* Action buttons — visible on hover */}
-        <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        {/* Action buttons — visible on hover (or always visible if blurred) */}
+        <div className={`absolute top-2 right-2 flex gap-1 z-10 transition-opacity ${
+          asset.isBlurred ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+        }`}>
           {/* Blur Enforcement */}
           <button
             onClick={onBlurEnforce}
             disabled={isEnforcing}
-            title="Enforce Global Blur"
-            className="grid h-7 w-7 place-items-center rounded-lg bg-black/50 text-muted-foreground hover:bg-primary/80 hover:text-white backdrop-blur-md transition-colors"
+            title={asset.isBlurred ? "Blur Enforcement Active" : "Enforce Global Blur"}
+            className={`grid h-7 w-7 place-items-center rounded-lg backdrop-blur-md transition-colors border ${
+              asset.isBlurred
+                ? "bg-crimson border-crimson text-white"
+                : "bg-black/50 border-white/5 text-muted-foreground hover:bg-primary/80 hover:text-white"
+            }`}
           >
             {isEnforcing ? (
               <Loader2 size={11} className="animate-spin" />

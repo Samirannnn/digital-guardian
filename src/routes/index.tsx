@@ -148,6 +148,7 @@ function OverviewPage() {
           scannedAt: r.scannedAt,
           blockNumber: r.blockNumber,
           locations: r.locations,
+          isBlurred: r.isBlurred,
         };
         setResult(scanResult);
         setIsOwnerOfResult(r.isOwner);

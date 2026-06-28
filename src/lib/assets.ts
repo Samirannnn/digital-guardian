@@ -5,6 +5,7 @@ import type { ScanResult, LeakLocation } from "./dna";
 import { useAuth } from "./auth";
 import { toast } from "sonner";
 import { useNavigate } from "@tanstack/react-router";
+import { getEnforcement } from "./phash";
 
 export type DbAsset = {
   id: string;
@@ -88,9 +89,18 @@ async function fetchAssets(userId: string): Promise<AssetWithLocations[]> {
         locsForAsset = (locs ?? []).filter((l) => l.asset_id === a.id);
       }
 
+      let isBlurred = false;
+      try {
+        const enf = await getEnforcement(a.hash);
+        isBlurred = enf.isEnforced;
+      } catch (e) {
+        console.warn("Could not fetch enforcement:", e);
+      }
+
       return {
         ...(a as DbAsset),
         signedUrl: urlMap.get(a.id) ?? null,
+        isBlurred,
         locations: locsForAsset.map<LeakLocation>((l) => {
           const parts = l.city.split(", ");
           return {
@@ -246,6 +256,7 @@ export type HashLookupResult = {
   uploadCount: number;        // how many times this hash appears in the DB
   deviceCount: number;        // entries in leak_locations for this hash
   locations: LeakLocation[];  // for the map
+  isBlurred: boolean;         // if owner has activated blur enforcement
 };
 
 /**
@@ -272,6 +283,7 @@ export async function lookupHashInDB(hash: string): Promise<HashLookupResult> {
       uploadCount: 0,
       deviceCount: 0,
       locations: [],
+      isBlurred: false,
     };
   }
 
@@ -299,6 +311,15 @@ export async function lookupHashInDB(hash: string): Promise<HashLookupResult> {
     };
   });
 
+  // Check blur status from API
+  let isBlurred = false;
+  try {
+    const enf = await getEnforcement(hash);
+    isBlurred = enf.isEnforced;
+  } catch (e) {
+    console.warn("Could not retrieve enforcement:", e);
+  }
+
   return {
     found: true,
     ownerEmail: original.app_email ?? null,
@@ -308,6 +329,7 @@ export async function lookupHashInDB(hash: string): Promise<HashLookupResult> {
     uploadCount: assets.length,
     deviceCount: locs?.length ?? 0,
     locations,
+    isBlurred,
   };
 }
 

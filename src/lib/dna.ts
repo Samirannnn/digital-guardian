@@ -33,6 +33,7 @@ export type ScanResult = {
   scannedAt: string;
   blockNumber: number;
   locations: LeakLocation[];
+  isBlurred?: boolean;
 };
 
 const cities: Omit<LeakLocation, "device" | "app" | "confidence" | "timestamp">[] = [

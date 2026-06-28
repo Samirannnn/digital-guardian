@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { ShieldCheck, ShieldAlert, MapPin, Smartphone, MessageCircle, Hash, X, Trash2, Mail, CheckCircle2 } from "lucide-react";
+import { ShieldCheck, ShieldAlert, MapPin, Smartphone, MessageCircle, Hash, X, Trash2, Mail, CheckCircle2, EyeOff } from "lucide-react";
 import type { ScanResult } from "@/lib/dna";
 import { WorldMap } from "./WorldMap";
 import { toast } from "sonner";
@@ -70,10 +70,22 @@ export function ResultView({ imageUrl, result, ownerEmail, fileName, onClose, is
 
           <div className="relative aspect-[4/3] bg-black/40">
             {fileType === "image" && (
-              <img src={imageUrl} alt={fileName || "Asset"} className="absolute inset-0 h-full w-full object-cover" />
+              <img
+                src={imageUrl}
+                alt={fileName || "Asset"}
+                className={`absolute inset-0 h-full w-full object-cover transition-all duration-300 ${
+                  !isOwner && result.isBlurred ? "filter blur-xl brightness-50" : ""
+                }`}
+              />
             )}
             {fileType === "video" && (
-              <video src={imageUrl} controls className="absolute inset-0 h-full w-full object-contain bg-black" />
+              <video
+                src={imageUrl}
+                controls
+                className={`absolute inset-0 h-full w-full object-contain bg-black transition-all duration-300 ${
+                  !isOwner && result.isBlurred ? "filter blur-2xl brightness-50" : ""
+                }`}
+              />
             )}
             {fileType === "audio" && (
               <div className="absolute inset-0 grid place-items-center bg-black/60 p-4">
@@ -81,7 +93,12 @@ export function ResultView({ imageUrl, result, ownerEmail, fileName, onClose, is
               </div>
             )}
             {fileType === "pdf" && (
-              <iframe src={imageUrl} className="absolute inset-0 h-full w-full border-none bg-white" />
+              <iframe
+                src={imageUrl}
+                className={`absolute inset-0 h-full w-full border-none bg-white transition-all duration-300 ${
+                  !isOwner && result.isBlurred ? "filter blur-2xl opacity-40 pointer-events-none" : ""
+                }`}
+              />
             )}
             {fileType === "other" && (
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 p-4 text-center">
@@ -94,6 +111,16 @@ export function ResultView({ imageUrl, result, ownerEmail, fileName, onClose, is
                 >
                   Download / View File
                 </a>
+              </div>
+            )}
+
+            {!isOwner && result.isBlurred && (
+              <div className="absolute inset-0 bg-black/70 backdrop-blur-sm flex flex-col items-center justify-center p-4 text-center z-10">
+                <EyeOff className="h-8 w-8 text-crimson mb-2 animate-pulse" />
+                <span className="text-xs font-bold text-white uppercase tracking-wider">Preview Restricted</span>
+                <span className="text-[10px] text-muted-foreground mt-1.5 max-w-xs leading-relaxed">
+                  The verified owner has blurred this asset on all external devices.
+                </span>
               </div>
             )}
 
