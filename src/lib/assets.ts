@@ -518,50 +518,20 @@ export async function wipeRemoteAsset(
   lat: number,
   lng: number
 ): Promise<{ success: boolean; message?: string }> {
-  // 1. Find the leak location for the owner's asset
-  const { data: ownerLocs, error: locErr } = await supabase
-    .from("leak_locations")
-    .select("id")
-    .eq("user_id", ownerUserId)
-    .eq("lat", lat)
-    .eq("lon", lng);
+  const { data, error } = await supabase.rpc("wipe_remote_asset", {
+    owner_uid: ownerUserId,
+    asset_hash: assetHash,
+    target_lat: lat,
+    target_lon: lng,
+  });
 
-  if (locErr) return { success: false, message: locErr.message };
-
-  if (ownerLocs && ownerLocs.length > 0) {
-    // Delete the owner's leak location pin
-    const { error: delLocErr } = await supabase
-      .from("leak_locations")
-      .delete()
-      .eq("id", ownerLocs[0].id);
-      
-    if (delLocErr) return { success: false, message: delLocErr.message };
+  if (error) {
+    console.error("Wipe remote asset RPC error:", error);
+    return { success: false, message: error.message };
   }
 
-  // 2. Find and delete the duplicate asset(s) and their leak locations
-  // Duplicate assets have the same hash but belong to other users
-  const { data: duplicates, error: dupErr } = await supabase
-    .from("assets")
-    .select("id, storage_path")
-    .eq("hash", assetHash)
-    .neq("user_id", ownerUserId);
-
-  if (dupErr) return { success: false, message: dupErr.message };
-
-  if (duplicates && duplicates.length > 0) {
-    for (const dup of duplicates) {
-      // Delete storage file
-      if (dup.storage_path) {
-        const { error: storageError } = await supabase.storage
-          .from("assets")
-          .remove([dup.storage_path]);
-        if (storageError) console.error("Failed to delete duplicate storage file:", storageError);
-      }
-      // Delete leak locations for the duplicate
-      await supabase.from("leak_locations").delete().eq("asset_id", dup.id);
-      // Delete the duplicate asset itself
-      await supabase.from("assets").delete().eq("id", dup.id);
-    }
+  if (data === false) {
+    return { success: false, message: "Authorized owner verification failed. Only the original owner can delete duplicate asset copies." };
   }
 
   return { success: true };
