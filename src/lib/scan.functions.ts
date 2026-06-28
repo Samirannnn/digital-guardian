@@ -24,7 +24,7 @@ export async function runScan(input: {
     city: string;
     country: string;
   };
-}): Promise<ScanResult & { assetId: string }> {
+}): Promise<ScanResult & { assetId: string; isOwner: boolean; ownerEmail: string | null }> {
   const {
     data: { user },
     error: authError,
@@ -40,7 +40,9 @@ export async function runScan(input: {
   // ── Step 2: Check Supabase for existing hash ──────────────────────────────
   const existing = await lookupHashInDB(hash);
 
-  let status: "clean" | "leaked" = "clean";
+  // An unauthorized duplicate upload is defined when the asset exists AND was registered by a different user
+  const isDuplicateUpload = existing.found && existing.ownerUserId !== user.id;
+  const status: "clean" | "leaked" = isDuplicateUpload ? "leaked" : "clean";
   let leakLocations: LeakLocation[] = [];
   const blockNumber = 18_452_193 + Math.floor(Math.random() * 9999);
   const scannedAt = new Date().toISOString();
@@ -54,10 +56,10 @@ export async function runScan(input: {
       storage_path: storagePath,
       size: fileSize,
       hash,
-      status: existing.found ? "leaked" : "clean",
+      status,
       block_number: blockNumber,
       scanned_at: scannedAt,
-      app_email: existing.found ? existing.ownerEmail : ownerEmail,
+      app_email: isDuplicateUpload ? existing.ownerEmail : ownerEmail,
     })
     .select()
     .single();
@@ -66,10 +68,8 @@ export async function runScan(input: {
     throw new Error(`Failed to save asset: ${aErr?.message ?? "unknown"}`);
   }
 
-  if (existing.found) {
-    // ── Asset already exists — this is a duplicate upload ──────────────────
-    status = "leaked";
-
+  if (isDuplicateUpload) {
+    // ── Asset already exists and uploaded by someone else — unauthorized duplicate upload ──
     const customCity = input.location
       ? `${input.location.city}, ${input.location.country}`
       : undefined;
@@ -88,7 +88,7 @@ export async function runScan(input: {
 
     leakLocations = [leakLocation, ...existing.locations];
 
-    // Persist this detection as a leak_location for the current scan
+    // 1. Persist this detection as a leak_location for the uploader's duplicate asset
     await supabase.from("leak_locations").insert({
       asset_id: asset.id,
       user_id: user.id,
@@ -103,24 +103,30 @@ export async function runScan(input: {
       detected_at: leakLocation.timestamp,
     });
 
-    // Also record this leak detection on the original owner's asset so it updates their map
+    // 2. Invoke SECURITY DEFINER RPC to update the owner's asset status to leaked
+    // and insert the leak location under the owner's account (bypasses RLS).
     if (existing.assetId && existing.ownerUserId) {
-      await supabase.from("leak_locations").insert({
-        asset_id: existing.assetId,
-        user_id: existing.ownerUserId,
-        city: customCity ?? (existing.locations[0]?.city 
-          ? `${existing.locations[0].city}, ${existing.locations[0].country}` 
-          : "Unknown"),
-        lat: leakLocation.lat,
-        lon: leakLocation.lng,
-        device: leakLocation.device,
-        app: leakLocation.app,
-        confidence: leakLocation.confidence,
-        detected_at: leakLocation.timestamp,
+      const cityString = customCity ?? (existing.locations[0]?.city 
+        ? `${existing.locations[0].city}, ${existing.locations[0].country}` 
+        : "Unknown");
+        
+      const { error: rpcErr } = await supabase.rpc("report_unauthorized_upload", {
+        p_asset_id: existing.assetId,
+        p_owner_id: existing.ownerUserId,
+        p_city: cityString,
+        p_lat: leakLocation.lat,
+        p_lon: leakLocation.lng,
+        p_device: leakLocation.device,
+        p_app: leakLocation.app,
+        p_confidence: leakLocation.confidence
       });
+      
+      if (rpcErr) {
+        console.error("Failed to invoke report_unauthorized_upload RPC:", rpcErr);
+      }
     }
   } else {
-    // ── First-time upload — Save owner's initial location ──────────────────
+    // ── First-time upload or Owner re-uploading — Save owner's initial location ──
     const customCity = input.location
       ? `${input.location.city}, ${input.location.country}`
       : "Unknown";
@@ -130,7 +136,7 @@ export async function runScan(input: {
       country: input.location?.country ?? "",
       lat: input.location?.lat ?? 0,
       lng: input.location?.lng ?? 0,
-      device: "Owner Register",
+      device: existing.found ? "Owner Scan" : "Owner Register",
       app: "Sentinel Web",
       confidence: 100,
       timestamp: scannedAt,
@@ -158,5 +164,7 @@ export async function runScan(input: {
     scannedAt,
     blockNumber,
     locations: leakLocations,
+    isOwner: !isDuplicateUpload,
+    ownerEmail: isDuplicateUpload ? existing.ownerEmail : ownerEmail,
   };
 }

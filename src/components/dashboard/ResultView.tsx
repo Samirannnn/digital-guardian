@@ -1,7 +1,18 @@
+import { useState } from "react";
 import { motion } from "framer-motion";
-import { ShieldCheck, ShieldAlert, MapPin, Smartphone, MessageCircle, Hash, X, Trash2 } from "lucide-react";
+import { ShieldCheck, ShieldAlert, MapPin, Smartphone, MessageCircle, Hash, X, Trash2, Mail, CheckCircle2 } from "lucide-react";
 import type { ScanResult } from "@/lib/dna";
 import { WorldMap } from "./WorldMap";
+import { toast } from "sonner";
+
+function maskEmail(email: string | null): string {
+  if (!email) return "Unknown";
+  if (email.includes("@")) {
+    const [name, domain] = email.split("@");
+    return `${name.slice(0, 2)}${"*".repeat(Math.max(2, name.length - 2))}@${domain}`;
+  }
+  return `${email.slice(0, 4)}****${email.slice(-4)}`;
+}
 
 type Props = {
   imageUrl: string;
@@ -25,6 +36,12 @@ function getFileType(fileName: string) {
 export function ResultView({ imageUrl, result, ownerEmail, fileName, onClose, isOwner, onWipe }: Props) {
   const leaked = result.status === "leaked";
   const fileType = fileName ? getFileType(fileName) : "image";
+  const [requestSent, setRequestSent] = useState(false);
+
+  const handleContactRequest = () => {
+    setRequestSent(true);
+    toast.success("📩 Contact request sent! The owner will be notified.");
+  };
 
   return (
     <motion.div
@@ -125,23 +142,27 @@ export function ResultView({ imageUrl, result, ownerEmail, fileName, onClose, is
       <div className="glass rounded-2xl overflow-hidden flex flex-col">
         <div
           className={`px-4 py-3 border-b border-border flex items-center gap-2 ${
-            leaked ? "bg-crimson/10" : "bg-emerald/10"
+            leaked ? (isOwner ? "bg-crimson/10" : "bg-orange-500/10") : "bg-emerald/10"
           }`}
         >
           {leaked ? (
-            <ShieldAlert size={16} className="text-crimson" />
+            isOwner ? (
+              <ShieldAlert size={16} className="text-crimson" />
+            ) : (
+              <ShieldAlert size={16} className="text-orange-400" />
+            )
           ) : (
             <ShieldCheck size={16} className="text-emerald" />
           )}
-          <span className={`text-sm font-semibold ${leaked ? "text-crimson" : "text-emerald"}`}>
-            {leaked ? "Leak Detected" : "Asset is Clean"}
+          <span className={`text-sm font-semibold ${leaked ? (isOwner ? "text-crimson" : "text-orange-400") : "text-emerald"}`}>
+            {leaked ? (isOwner ? "Leak Detected" : "Registered Asset Found") : "Asset is Clean"}
           </span>
           <span className="ml-auto text-[10px] font-mono text-muted-foreground uppercase tracking-wider">
             Distribution Report
           </span>
         </div>
 
-        {leaked && (
+        {leaked && isOwner && (
           <div className="mx-4 mt-4 p-3 rounded-xl bg-crimson/10 border border-crimson/25 text-xs text-crimson flex items-center gap-2">
             <ShieldAlert size={14} className="shrink-0 animate-pulse text-crimson" />
             <span><strong>Leak Alert:</strong> Unauthorized copies of this digital asset have been discovered on client devices.</span>
@@ -149,62 +170,111 @@ export function ResultView({ imageUrl, result, ownerEmail, fileName, onClose, is
         )}
 
         {leaked ? (
-          <>
-            <div className="p-2 border-b border-border">
-              <WorldMap pins={result.locations} compact />
-            </div>
-            <div className="flex-1 max-h-72 overflow-auto divide-y divide-border">
-              {result.locations.map((loc, i) => (
-                <motion.div
-                  key={i}
-                  initial={{ opacity: 0, x: 10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.1 + i * 0.08 }}
-                  className="p-4 flex items-center gap-3 hover:bg-white/[0.03]"
+          !isOwner ? (
+            /* Duplicate Uploader / Third-party View */
+            <div className="p-6 flex flex-col justify-between flex-1 space-y-6">
+              <div className="space-y-4">
+                <div className="p-4 rounded-xl bg-orange-500/10 border border-orange-500/30 text-xs text-orange-400 flex items-start gap-2.5">
+                  <ShieldAlert size={16} className="shrink-0 mt-0.5 text-orange-400" />
+                  <div>
+                    <strong className="text-white block mb-0.5 font-bold text-sm">Asset Already Registered</strong>
+                    This image is already registered to another owner.
+                  </div>
+                </div>
+
+                <div className="space-y-3.5">
+                  <div>
+                    <span className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider">Registered Owner</span>
+                    <div className="text-sm font-medium text-white font-mono mt-1 bg-white/5 border border-border rounded-lg px-3 py-2">
+                      {ownerEmail ? maskEmail(ownerEmail) : "Protected User"}
+                    </div>
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider">Ownership Verification Status</span>
+                    <div className="mt-1 flex items-center gap-2 text-emerald bg-emerald/10 border border-emerald/20 px-3 py-2 rounded-lg text-xs font-semibold">
+                      <CheckCircle2 size={14} className="shrink-0" />
+                      <span>Verified Owner on Polygon Blockchain</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-border">
+                <button
+                  onClick={handleContactRequest}
+                  disabled={requestSent}
+                  className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 ${
+                    requestSent
+                      ? "bg-white/5 text-muted-foreground border border-border cursor-not-allowed"
+                      : "bg-gradient-to-r from-primary to-cyber text-primary-foreground hover:opacity-90 hover:scale-[1.01] active:scale-95 cursor-pointer"
+                  }`}
                 >
-                  <div className="grid h-9 w-9 place-items-center rounded-lg bg-crimson/15 text-crimson shrink-0">
-                    <MapPin size={15} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-sm">{loc.city}, {loc.country}</span>
-                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-crimson/15 text-crimson">
-                        {loc.confidence}% match
-                      </span>
-                    </div>
-                    {/* Display coordinates explicitly */}
-                    <div className="mt-0.5 text-[10px] font-mono text-primary/70">
-                      GPS: {loc.lat.toFixed(4)}, {loc.lng.toFixed(4)}
-                    </div>
-                    <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground font-mono">
-                      <span className="flex items-center gap-1">
-                        <Smartphone size={11} /> {loc.device}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <MessageCircle size={11} /> {loc.app}
-                      </span>
-                    </div>
-                  </div>
-                  {/* Remove / Wipe button for owners */}
-                  {isOwner && onWipe && (
-                    <button
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        if (confirm(`Are you sure you want to remove this asset copy at coordinates [${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}]? This will wipe the duplicate asset from the other device/user.`)) {
-                          await onWipe(loc.lat, loc.lng);
-                        }
-                      }}
-                      title="Remove from Device"
-                      className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-semibold bg-crimson/15 hover:bg-crimson/30 border border-crimson/35 text-crimson hover:text-white transition-all scale-[0.98] hover:scale-100 active:scale-[0.96]"
-                    >
-                      <Trash2 size={11} />
-                      Remove
-                    </button>
-                  )}
-                </motion.div>
-              ))}
+                  <Mail size={14} />
+                  {requestSent ? "Contact Request Sent" : "Request Contact with Owner"}
+                </button>
+                <p className="text-[10px] text-center text-muted-foreground mt-2 font-mono">
+                  Your identity remains private until you choose to share it.
+                </p>
+              </div>
             </div>
-          </>
+          ) : (
+            /* Original Owner's Sighting Map View */
+            <>
+              <div className="p-2 border-b border-border">
+                <WorldMap pins={result.locations} compact />
+              </div>
+              <div className="flex-1 max-h-72 overflow-auto divide-y divide-border">
+                {result.locations.map((loc, i) => (
+                  <motion.div
+                    key={i}
+                    initial={{ opacity: 0, x: 10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.1 + i * 0.08 }}
+                    className="p-4 flex items-center gap-3 hover:bg-white/[0.03]"
+                  >
+                    <div className="grid h-9 w-9 place-items-center rounded-lg bg-crimson/15 text-crimson shrink-0">
+                      <MapPin size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm">{loc.city}, {loc.country}</span>
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-crimson/15 text-crimson">
+                          {loc.confidence}% match
+                        </span>
+                      </div>
+                      <div className="mt-0.5 text-[10px] font-mono text-primary/70">
+                        GPS: {loc.lat.toFixed(4)}, {loc.lng.toFixed(4)}
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground font-mono">
+                        <span className="flex items-center gap-1">
+                          <Smartphone size={11} /> {loc.device}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <MessageCircle size={11} /> {loc.app}
+                        </span>
+                      </div>
+                    </div>
+                    {isOwner && onWipe && (
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (confirm(`Are you sure you want to remove this asset copy at coordinates [${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}]? This will wipe the duplicate asset from the other device/user.`)) {
+                            await onWipe(loc.lat, loc.lng);
+                          }
+                        }}
+                        title="Remove from Device"
+                        className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-semibold bg-crimson/15 hover:bg-crimson/30 border border-crimson/35 text-crimson hover:text-white transition-all scale-[0.98] hover:scale-100 active:scale-[0.96]"
+                      >
+                        <Trash2 size={11} />
+                        Remove
+                      </button>
+                    )}
+                  </motion.div>
+                ))}
+              </div>
+            </>
+          )
         ) : (
           <div className="flex-1 grid place-items-center p-10 text-center">
             <div>

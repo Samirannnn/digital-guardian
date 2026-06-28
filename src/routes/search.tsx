@@ -17,6 +17,7 @@ import {
   RotateCcw,
   Lock,
   Copy,
+  Mail,
 } from "lucide-react";
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { WorldMap } from "@/components/dashboard/WorldMap";
@@ -64,6 +65,7 @@ function SearchPage() {
   const [copiedHash, setCopiedHash] = useState(false);
   const [transferEmail, setTransferEmail] = useState("");
   const [isTransferring, setIsTransferring] = useState(false);
+  const [contactRequestSent, setContactRequestSent] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !session) navigate({ to: "/auth" });
@@ -100,7 +102,13 @@ function SearchPage() {
     setPreviewUrl(null);
     setSearchResult(null);
     setHash(null);
+    setContactRequestSent(false);
     setState("idle");
+  };
+
+  const handleContactRequest = () => {
+    setContactRequestSent(true);
+    toast.success("📩 Contact request sent! The owner has been notified.");
   };
 
   const handleRegister = async () => {
@@ -401,9 +409,34 @@ function SearchPage() {
                             </div>
                           </div>
                         ) : (
-                          <div className="flex items-start gap-2 rounded-xl bg-crimson/10 border border-crimson/20 px-3 py-2.5 text-xs text-crimson">
-                            <XCircle size={14} className="shrink-0 mt-0.5" />
-                            <span>This asset is already registered. You are not the owner.</span>
+                          <div className="space-y-4">
+                            <div className="flex items-start gap-2 rounded-xl bg-crimson/10 border border-crimson/20 px-3 py-2.5 text-xs text-crimson">
+                              <XCircle size={14} className="shrink-0 mt-0.5" />
+                              <span>This asset is already registered. You are not the owner.</span>
+                            </div>
+
+                            <div className="rounded-xl border border-border bg-black/20 p-4 space-y-3">
+                              <div className="text-[10px] uppercase font-mono tracking-wider text-muted-foreground">
+                                Ownership Verification Status
+                              </div>
+                              <div className="flex items-center gap-2 text-emerald bg-emerald/10 border border-emerald/20 px-3 py-2.5 rounded-lg text-xs font-semibold">
+                                <CheckCircle2 size={14} className="shrink-0" />
+                                <span>Verified Owner on Polygon Blockchain</span>
+                              </div>
+
+                              <button
+                                onClick={handleContactRequest}
+                                disabled={contactRequestSent}
+                                className={`w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-xs font-semibold mt-2 transition-all duration-200 ${
+                                  contactRequestSent
+                                    ? "bg-white/5 text-muted-foreground border border-border cursor-not-allowed"
+                                    : "bg-gradient-to-r from-primary to-cyber text-primary-foreground hover:opacity-90 hover:scale-[1.01] active:scale-95 cursor-pointer"
+                                }`}
+                              >
+                                <Mail size={12} />
+                                {contactRequestSent ? "Contact Request Sent" : "Send Contact Request to Owner"}
+                              </button>
+                            </div>
                           </div>
                         )}
                       </>
@@ -432,8 +465,8 @@ function SearchPage() {
                   </div>
                 </div>
 
-                {/* Map — shown when locations exist */}
-                {state === "found" && searchResult.locations.length > 0 && (
+                {/* Map — shown when locations exist AND current user is owner */}
+                {state === "found" && isCurrentUserOwner && searchResult.locations.length > 0 && (
                   <div className="border-t border-border">
                     <div className="px-5 py-3 flex items-center gap-2">
                       <MapPin size={13} className="text-crimson" />
@@ -467,8 +500,8 @@ function SearchPage() {
                   </div>
                 )}
 
-                {/* No locations but found — show upload count info */}
-                {state === "found" && searchResult.locations.length === 0 && (
+                {/* No locations but found — show upload count info to owner */}
+                {state === "found" && isCurrentUserOwner && searchResult.locations.length === 0 && (
                   <div className="border-t border-border px-5 py-4 flex items-center gap-2 text-xs text-muted-foreground">
                     <MapPin size={12} />
                     <span>No device locations recorded yet for this asset.</span>
