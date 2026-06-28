@@ -478,9 +478,17 @@ export async function fetchPendingTransfers(userId: string): Promise<TransferReq
 /**
  * Accepts a transfer request by calling the accept_transfer_request RPC function.
  */
-export async function acceptTransfer(requestId: string): Promise<{ success: boolean; message?: string }> {
+export async function acceptTransfer(
+  requestId: string,
+  lat: number,
+  lng: number,
+  city: string
+): Promise<{ success: boolean; message?: string }> {
   const { data, error } = await supabase.rpc("accept_transfer_request", {
     request_id: requestId,
+    new_lat: lat,
+    new_lon: lng,
+    new_city: city,
   });
 
   if (error) return { success: false, message: error.message };

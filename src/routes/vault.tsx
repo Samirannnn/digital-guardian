@@ -32,6 +32,7 @@ import {
 } from "@/lib/assets";
 import { ResultView } from "@/components/dashboard/ResultView";
 import { enforceBlur, transferOwnership } from "@/lib/phash";
+import { reverseGeocode } from "@/lib/geo";
 
 export const Route = createFileRoute("/vault")({
   head: () => ({
@@ -175,7 +176,29 @@ function VaultPage() {
   const handleAcceptRequest = async (requestId: string, assetName = "Asset") => {
     setActioningRequestId(requestId);
     try {
-      const res = await acceptTransfer(requestId);
+      // Fetch browser geolocation
+      let lat = 22.57;
+      let lng = 88.36;
+      let city = "Kolkata, IN";
+
+      try {
+        const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 4000 });
+        });
+        lat = pos.coords.latitude;
+        lng = pos.coords.longitude;
+        
+        try {
+          const geo = await reverseGeocode(lat, lng);
+          city = `${geo.city}, ${geo.country}`;
+        } catch (e) {
+          console.warn("Reverse geocoding failed on accept:", e);
+        }
+      } catch (e) {
+        console.warn("Geolocation query failed on accept, using fallback location:", e);
+      }
+
+      const res = await acceptTransfer(requestId, lat, lng, city);
       if (res.success) {
         toast.success(`🎉 You are now the owner of "${assetName}"!`);
         refetch(); // Refetch vault assets
