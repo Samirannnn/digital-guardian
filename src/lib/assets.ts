@@ -312,7 +312,7 @@ export type HashLookupResult = {
 export async function lookupHashInDB(hash: string): Promise<HashLookupResult> {
   const { data: assets, error } = await supabase
     .from("assets")
-    .select("id, name, user_id, app_email, created_at, enforce_blur, blur_strength, blurred_preview_path, is_blurred")
+    .select("id, name, user_id, app_email, created_at, enforce_blur, blur_strength, blurred_preview_path")
     .eq("hash", hash)
     .order("created_at", { ascending: true }); // oldest first = original owner
 
@@ -341,7 +341,6 @@ export async function lookupHashInDB(hash: string): Promise<HashLookupResult> {
   // Get current user to check ownership
   const { data: { user } } = await supabase.auth.getUser();
   const currentUserId = user?.id;
-  const isOwner = currentUserId === original.user_id;
 
   const { data: locs } = await supabase
     .from("leak_locations")
@@ -362,7 +361,7 @@ export async function lookupHashInDB(hash: string): Promise<HashLookupResult> {
     };
   });
 
-  let isBlurred = original.enforce_blur ?? original.is_blurred ?? false;
+  let isBlurred = (original as any).enforce_blur ?? (original as any).is_blurred ?? false;
   if (!isBlurred) {
     try {
       const enf = await getEnforcement(hash);
@@ -374,10 +373,10 @@ export async function lookupHashInDB(hash: string): Promise<HashLookupResult> {
 
   let blurredPreviewUrl: string | null = null;
 
-  if (isBlurred && original.blurred_preview_path) {
+  if (isBlurred && (original as any).blurred_preview_path) {
     const { data: signData } = await supabase.storage
       .from("assets")
-      .createSignedUrl(original.blurred_preview_path, SIGNED_URL_TTL);
+      .createSignedUrl((original as any).blurred_preview_path, SIGNED_URL_TTL);
     blurredPreviewUrl = signData?.signedUrl ?? null;
   }
 
@@ -391,7 +390,7 @@ export async function lookupHashInDB(hash: string): Promise<HashLookupResult> {
     deviceCount: locs?.length ?? 0,
     locations,
     isBlurred,
-    blurStrength: original.blur_strength ?? 20,
+    blurStrength: (original as any).blur_strength ?? 20,
     blurredPreviewUrl,
   };
 }
@@ -421,15 +420,14 @@ export async function updateAssetProtection(params: {
     return { success: false, message: "Asset not found" };
   }
 
-  const prevEnforce = existingAsset.enforce_blur ?? existingAsset.is_blurred ?? false;
-  const prevStrength = existingAsset.blur_strength ?? 20;
+  const prevEnforce = (existingAsset as any).enforce_blur ?? (existingAsset as any).is_blurred ?? false;
+  const prevStrength = (existingAsset as any).blur_strength ?? 20;
 
-  let blurredPreviewPath = existingAsset.blurred_preview_path;
+  let blurredPreviewPath = (existingAsset as any).blurred_preview_path;
 
   // 2. If protection is enabled or blur strength changed, generate/update protected preview
   if (enforceBlur && (imageSource || !blurredPreviewPath || prevStrength !== blurStrength)) {
     try {
-      // Use provided imageSource or get signed URL for original file
       let sourceToProcess = imageSource;
       if (!sourceToProcess) {
         const { data: signData } = await supabase.storage
@@ -453,15 +451,16 @@ export async function updateAssetProtection(params: {
     }
   }
 
-  // 3. Update database record
+  // 3. Update database record (safe payload)
+  const updatePayload: Record<string, any> = {
+    enforce_blur: enforceBlur,
+    blur_strength: blurStrength,
+    blurred_preview_path: blurredPreviewPath,
+  };
+
   const { error: updateErr } = await supabase
     .from("assets")
-    .update({
-      enforce_blur: enforceBlur,
-      is_blurred: enforceBlur,
-      blur_strength: blurStrength,
-      blurred_preview_path: blurredPreviewPath,
-    })
+    .update(updatePayload)
     .eq("id", assetId)
     .eq("user_id", userId);
 
