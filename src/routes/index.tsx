@@ -15,6 +15,9 @@ import {
   MapPin,
   Smartphone,
   MessageCircle,
+  EyeOff,
+  Lock,
+  History,
 } from "lucide-react";
 import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { StatCard } from "@/components/dashboard/StatCard";
@@ -32,6 +35,8 @@ import {
   useRefreshAssets,
   uploadAssetFile,
   wipeRemoteAsset,
+  fetchProtectionAuditLogs,
+  type AuditLogEntry,
 } from "@/lib/assets";
 import { runScan } from "@/lib/scan.functions";
 import { LocationDialog } from "@/components/dashboard/LocationDialog";
@@ -88,9 +93,18 @@ function OverviewPage() {
   const [vaultScanResult, setVaultScanResult] = useState<any[] | null>(null);
   const [vaultLeakedAssets, setVaultLeakedAssets] = useState<any[]>([]);
 
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
+
   const { data: items = [] } = useAssets();
   useAssetsRealtime();
   const refresh = useRefreshAssets();
+
+  // Load audit logs
+  useEffect(() => {
+    if (user?.id) {
+      fetchProtectionAuditLogs(user.id).then(setAuditLogs);
+    }
+  }, [user?.id, items]);
 
   // Auth guard
   useEffect(() => {
@@ -154,7 +168,6 @@ function OverviewPage() {
         setIsOwnerOfResult(r.isOwner);
         setResultOwnerEmail(r.ownerEmail);
         refresh();
-        // Check if blockchain was unreachable
         const blockchainDown = (r as any)._blockchainUnavailable;
         if (r.status === "leaked") {
           setLeakAlert({ fileName: file.name, result: scanResult });
@@ -172,7 +185,6 @@ function OverviewPage() {
       setScanning(false);
       setImageUrl(null);
       const msg = err instanceof Error ? err.message : "Scan failed";
-      // Give a friendlier message for API cold-start / unreachable errors
       if (msg.includes("503") || msg.includes("unreachable") || msg.includes("timeout")) {
         toast.error("⏳ Blockchain API is waking up — please try again in 20 seconds", { duration: 8000 });
       } else {
@@ -199,7 +211,6 @@ function OverviewPage() {
       "Generating threat location mapping..."
     ];
 
-    // Simulate progress
     const start = Date.now();
     const interval = setInterval(() => {
       const elapsed = Date.now() - start;
@@ -215,7 +226,6 @@ function OverviewPage() {
 
       setTimeout(() => {
         setVaultScanning(false);
-        // Find leaked assets and gather all their location pins
         const leaked = items.filter((it) => it.status === "leaked");
         const allPins = leaked.flatMap((it) => 
           it.locations.map((loc) => ({
@@ -240,6 +250,8 @@ function OverviewPage() {
     (n, i) => n + (i.status === "leaked" ? i.locations.length : 0),
     0,
   );
+
+  const protectedCount = items.filter((it) => it.enforce_blur || it.isBlurred).length;
 
   if (authLoading || !session) {
     return (
@@ -299,15 +311,23 @@ function OverviewPage() {
           )}
         </AnimatePresence>
 
-        {/* Stats */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 lg:gap-4">
+        {/* Stats Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
           <StatCard
-            label="Protected Assets"
+            label="Total Assets"
             value={String(items.length)}
             delta={items.length > 0 ? `${items.length} on-chain` : "Get started"}
             icon={Boxes}
             accent="primary"
             index={0}
+          />
+          <StatCard
+            label="Blur Protected"
+            value={String(protectedCount)}
+            delta={`${protectedCount} / ${items.length} protected`}
+            icon={EyeOff}
+            accent="emerald"
+            index={1}
           />
           <StatCard
             label="Active Leaks"
@@ -316,16 +336,15 @@ function OverviewPage() {
             trend={totalLeaks > 0 ? "down" : "up"}
             icon={AlertOctagon}
             accent="crimson"
-            index={1}
+            index={2}
           />
-
           <StatCard
             label="Blockchain Sync"
             value="100%"
             delta="Polygon · 18ms"
             icon={Cpu}
-            accent="emerald"
-            index={2}
+            accent="primary"
+            index={3}
           />
         </div>
 
@@ -578,8 +597,9 @@ function OverviewPage() {
             </AnimatePresence>
           </div>
 
-          <div className="lg:col-span-1">
+          <div className="lg:col-span-1 space-y-6">
             <ActiveThreatsFeed />
+            <ProtectionActivityFeed logs={auditLogs} />
           </div>
         </div>
 
@@ -647,6 +667,53 @@ function RecentStrip() {
               <div className="absolute bottom-1 inset-x-1 text-[9px] font-mono text-white/80 truncate">
                 {it.name}
               </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ProtectionActivityFeed({ logs }: { logs: AuditLogEntry[] }) {
+  if (logs.length === 0) return null;
+
+  const getActionLabel = (action: string) => {
+    switch (action) {
+      case "BLUR_ENABLED":
+        return { label: "Protection Enabled 🔒", cls: "text-crimson bg-crimson/15 border-crimson/30" };
+      case "BLUR_DISABLED":
+        return { label: "Protection Disabled 🔓", cls: "text-muted-foreground bg-white/5 border-border" };
+      case "BLUR_STRENGTH_CHANGED":
+        return { label: "Blur Strength Updated", cls: "text-primary bg-primary/15 border-primary/30" };
+      default:
+        return { label: action, cls: "text-white bg-white/5 border-border" };
+    }
+  };
+
+  return (
+    <div className="glass rounded-2xl p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-white">
+          <History size={13} className="text-primary" /> Protection Activity
+        </div>
+        <span className="text-[10px] font-mono text-muted-foreground">{logs.length} events</span>
+      </div>
+
+      <div className="divide-y divide-border/50 max-h-56 overflow-y-auto">
+        {logs.slice(0, 5).map((log) => {
+          const act = getActionLabel(log.action);
+          return (
+            <div key={log.id} className="py-2.5 flex items-start justify-between gap-2 text-xs">
+              <div className="min-w-0">
+                <div className="font-semibold text-white truncate max-w-[170px]">{log.assetName}</div>
+                <div className="text-[10px] text-muted-foreground font-mono mt-0.5">
+                  {new Date(log.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </div>
+              </div>
+              <span className={`text-[9px] font-mono px-2 py-0.5 rounded-full border ${act.cls} shrink-0`}>
+                {act.label}
+              </span>
             </div>
           );
         })}

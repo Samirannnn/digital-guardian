@@ -1,9 +1,28 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { ShieldCheck, ShieldAlert, MapPin, Smartphone, MessageCircle, Hash, X, Trash2, Mail, CheckCircle2, EyeOff } from "lucide-react";
+import {
+  ShieldCheck,
+  ShieldAlert,
+  MapPin,
+  Smartphone,
+  MessageCircle,
+  Hash,
+  X,
+  Trash2,
+  Mail,
+  CheckCircle2,
+  EyeOff,
+  Lock,
+  Loader2,
+  SlidersHorizontal,
+} from "lucide-react";
 import type { ScanResult } from "@/lib/dna";
 import { WorldMap } from "./WorldMap";
 import { toast } from "sonner";
+import { ProtectionConfirmModal } from "./ProtectionConfirmModal";
+import { BLUR_PRESETS } from "@/lib/blur";
+import { updateAssetProtection } from "@/lib/assets";
+import { useAuth } from "@/lib/auth";
 
 function maskEmail(email: string | null): string {
   if (!email) return "Unknown";
@@ -19,9 +38,12 @@ type Props = {
   result: ScanResult;
   ownerEmail?: string | null;
   fileName?: string;
+  assetId?: string;
+  blurStrength?: number;
   onClose: () => void;
   isOwner?: boolean;
   onWipe?: (lat: number, lng: number) => Promise<void>;
+  onRefresh?: () => void;
 };
 
 function getFileType(fileName: string) {
@@ -33,14 +55,99 @@ function getFileType(fileName: string) {
   return "other";
 }
 
-export function ResultView({ imageUrl, result, ownerEmail, fileName, onClose, isOwner, onWipe }: Props) {
+export function ResultView({
+  imageUrl,
+  result,
+  ownerEmail,
+  fileName,
+  assetId,
+  blurStrength = 20,
+  onClose,
+  isOwner,
+  onWipe,
+  onRefresh,
+}: Props) {
+  const { user } = useAuth();
   const leaked = result.status === "leaked";
   const fileType = fileName ? getFileType(fileName) : "image";
   const [requestSent, setRequestSent] = useState(false);
 
+  // Protection state
+  const [enforceBlur, setEnforceBlur] = useState<boolean>(result.isBlurred ?? false);
+  const [selectedStrength, setSelectedStrength] = useState<number>(blurStrength);
+  const [pendingBlurState, setPendingBlurState] = useState<boolean | null>(null);
+  const [isSavingProtection, setIsSavingProtection] = useState(false);
+
   const handleContactRequest = () => {
     setRequestSent(true);
     toast.success("📩 Contact request sent! The owner will be notified.");
+  };
+
+  const handleToggleClick = (targetState: boolean) => {
+    setPendingBlurState(targetState);
+  };
+
+  const handleConfirmProtectionChange = async () => {
+    if (pendingBlurState === null || !assetId || !user?.id || !user?.email) return;
+    const nextState = pendingBlurState;
+    setPendingBlurState(null);
+    setIsSavingProtection(true);
+
+    try {
+      const res = await updateAssetProtection({
+        assetId,
+        userId: user.id,
+        userEmail: user.email,
+        hash: result.hash,
+        enforceBlur: nextState,
+        blurStrength: selectedStrength,
+        imageSource: imageUrl,
+      });
+
+      if (res.success) {
+        setEnforceBlur(nextState);
+        toast.success(
+          nextState
+            ? "🔒 Asset protection enabled! Other users will only see a blurred preview."
+            : "🔓 Asset protection disabled."
+        );
+        if (onRefresh) onRefresh();
+      } else {
+        toast.error(res.message || "Failed to update protection settings.");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("An error occurred while updating protection settings.");
+    } finally {
+      setIsSavingProtection(false);
+    }
+  };
+
+  const handleSaveStrength = async () => {
+    if (!assetId || !user?.id || !user?.email) return;
+    setIsSavingProtection(true);
+    try {
+      const res = await updateAssetProtection({
+        assetId,
+        userId: user.id,
+        userEmail: user.email,
+        hash: result.hash,
+        enforceBlur,
+        blurStrength: selectedStrength,
+        imageSource: imageUrl,
+      });
+
+      if (res.success) {
+        toast.success(`✓ Blur strength updated to ${selectedStrength}px.`);
+        if (onRefresh) onRefresh();
+      } else {
+        toast.error(res.message || "Failed to update blur strength.");
+      }
+    } catch {
+      toast.error("Failed to update blur strength.");
+    } finally {
+      setIsSavingProtection(false);
+    }
   };
 
   return (
@@ -62,7 +169,7 @@ export function ResultView({ imageUrl, result, ownerEmail, fileName, onClose, is
             </div>
             <button
               onClick={onClose}
-              className="grid h-7 w-7 place-items-center rounded-md hover:bg-white/5 text-muted-foreground"
+              className="grid h-7 w-7 place-items-center rounded-md hover:bg-white/5 text-muted-foreground cursor-pointer"
             >
               <X size={14} />
             </button>
@@ -81,7 +188,7 @@ export function ResultView({ imageUrl, result, ownerEmail, fileName, onClose, is
             {fileType === "video" && (
               <video
                 src={imageUrl}
-                controls
+                controls={isOwner || !result.isBlurred}
                 className={`absolute inset-0 h-full w-full object-contain bg-black transition-all duration-300 ${
                   !isOwner && result.isBlurred ? "filter blur-2xl brightness-50" : ""
                 }`}
@@ -89,7 +196,14 @@ export function ResultView({ imageUrl, result, ownerEmail, fileName, onClose, is
             )}
             {fileType === "audio" && (
               <div className="absolute inset-0 grid place-items-center bg-black/60 p-4">
-                <audio src={imageUrl} controls className="w-full" />
+                {isOwner || !result.isBlurred ? (
+                  <audio src={imageUrl} controls className="w-full" />
+                ) : (
+                  <div className="text-center space-y-1">
+                    <Lock className="h-6 w-6 text-crimson mx-auto" />
+                    <span className="text-xs text-muted-foreground font-mono">Audio Playback Restricted</span>
+                  </div>
+                )}
               </div>
             )}
             {fileType === "pdf" && (
@@ -102,25 +216,32 @@ export function ResultView({ imageUrl, result, ownerEmail, fileName, onClose, is
             )}
             {fileType === "other" && (
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 p-4 text-center">
-                <span className="text-xs font-semibold mb-2">No preview available for this file type</span>
-                <a
-                  href={imageUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-[10px] font-semibold hover:opacity-90 transition-opacity"
-                >
-                  Download / View File
-                </a>
+                <span className="text-xs font-semibold mb-2">
+                  {!isOwner && result.isBlurred ? "🔒 Protected Asset — Preview Restricted" : "No preview available for this file type"}
+                </span>
+                {(isOwner || !result.isBlurred) && (
+                  <a
+                    href={imageUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-[10px] font-semibold hover:opacity-90 transition-opacity"
+                  >
+                    Download / View File
+                  </a>
+                )}
               </div>
             )}
 
+            {/* Non-owner restricted overlay */}
             {!isOwner && result.isBlurred && (
-              <div className="absolute inset-0 bg-black/70 backdrop-blur-sm flex flex-col items-center justify-center p-4 text-center z-10">
-                <EyeOff className="h-8 w-8 text-crimson mb-2 animate-pulse" />
-                <span className="text-xs font-bold text-white uppercase tracking-wider">Preview Restricted</span>
-                <span className="text-[10px] text-muted-foreground mt-1.5 max-w-xs leading-relaxed">
-                  The verified owner has blurred this asset on all external devices.
-                </span>
+              <div className="absolute inset-0 bg-black/75 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center z-10 space-y-2">
+                <div className="grid h-12 w-12 place-items-center rounded-2xl bg-crimson/20 border border-crimson/30 text-crimson animate-pulse">
+                  <Lock size={22} />
+                </div>
+                <span className="text-sm font-bold text-white uppercase tracking-wider">🔒 Protected Asset</span>
+                <p className="text-xs text-muted-foreground max-w-xs leading-relaxed">
+                  This asset has been protected by its owner. Non-owners are restricted from viewing or downloading the original file.
+                </p>
               </div>
             )}
 
@@ -147,14 +268,20 @@ export function ResultView({ imageUrl, result, ownerEmail, fileName, onClose, is
               <span className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider">Registered Owner</span>
               <span className="font-mono text-primary font-medium mt-0.5">{ownerEmail || "Unknown"}</span>
             </div>
-            <a
-              href={imageUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-2.5 py-1 rounded-md border border-border hover:bg-white/5 transition-colors text-[10px] font-semibold"
-            >
-              Open Original
-            </a>
+            {isOwner || !result.isBlurred ? (
+              <a
+                href={imageUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-2.5 py-1 rounded-md border border-border hover:bg-white/5 transition-colors text-[10px] font-semibold"
+              >
+                Download Original
+              </a>
+            ) : (
+              <span className="px-2.5 py-1 rounded-md border border-crimson/30 bg-crimson/10 text-crimson text-[10px] font-semibold flex items-center gap-1">
+                <Lock size={10} /> Original download restricted
+              </span>
+            )}
           </div>
 
           <div className="grid grid-cols-3 gap-px bg-border border-t border-border">
@@ -165,160 +292,243 @@ export function ResultView({ imageUrl, result, ownerEmail, fileName, onClose, is
         </div>
       </div>
 
-      {/* RIGHT — distribution report */}
-      <div className="glass rounded-2xl overflow-hidden flex flex-col">
-        <div
-          className={`px-4 py-3 border-b border-border flex items-center gap-2 ${
-            leaked ? (isOwner ? "bg-crimson/10" : "bg-orange-500/10") : "bg-emerald/10"
-          }`}
-        >
-          {leaked ? (
-            isOwner ? (
-              <ShieldAlert size={16} className="text-crimson" />
-            ) : (
-              <ShieldAlert size={16} className="text-orange-400" />
-            )
-          ) : (
-            <ShieldCheck size={16} className="text-emerald" />
-          )}
-          <span className={`text-sm font-semibold ${leaked ? (isOwner ? "text-crimson" : "text-orange-400") : "text-emerald"}`}>
-            {leaked ? (isOwner ? "Leak Detected" : "Registered Asset Found") : "Asset is Clean"}
-          </span>
-          <span className="ml-auto text-[10px] font-mono text-muted-foreground uppercase tracking-wider">
-            Distribution Report
-          </span>
-        </div>
-
-        {leaked && isOwner && (
-          <div className="mx-4 mt-4 p-3 rounded-xl bg-crimson/10 border border-crimson/25 text-xs text-crimson flex items-center gap-2">
-            <ShieldAlert size={14} className="shrink-0 animate-pulse text-crimson" />
-            <span><strong>Leak Alert:</strong> Unauthorized copies of this digital asset have been discovered on client devices.</span>
+      {/* RIGHT — Owner Protection Controls or Distribution Report */}
+      <div className="glass rounded-2xl overflow-hidden flex flex-col justify-between">
+        <div>
+          <div
+            className={`px-4 py-3 border-b border-border flex items-center justify-between ${
+              leaked ? (isOwner ? "bg-crimson/10" : "bg-orange-500/10") : "bg-emerald/10"
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              {leaked ? (
+                isOwner ? (
+                  <ShieldAlert size={16} className="text-crimson" />
+                ) : (
+                  <ShieldAlert size={16} className="text-orange-400" />
+                )
+              ) : (
+                <ShieldCheck size={16} className="text-emerald" />
+              )}
+              <span className={`text-sm font-semibold ${leaked ? (isOwner ? "text-crimson" : "text-orange-400") : "text-emerald"}`}>
+                {leaked ? (isOwner ? "Leak Detected" : "Registered Asset Found") : "Asset is Clean"}
+              </span>
+            </div>
+            <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">
+              {isOwner ? "Owner Control & Distribution" : "Protection Report"}
+            </span>
           </div>
-        )}
 
-        {leaked ? (
-          !isOwner ? (
-            /* Duplicate Uploader / Third-party View */
-            <div className="p-6 flex flex-col justify-between flex-1 space-y-6">
-              <div className="space-y-4">
-                <div className="p-4 rounded-xl bg-orange-500/10 border border-orange-500/30 text-xs text-orange-400 flex items-start gap-2.5">
-                  <ShieldAlert size={16} className="shrink-0 mt-0.5 text-orange-400" />
-                  <div>
-                    <strong className="text-white block mb-0.5 font-bold text-sm">Asset Already Registered</strong>
-                    This image is already registered to another owner.
-                  </div>
+          {/* ── OWNER ASSET PROTECTION CONTROL PANEL ── */}
+          {isOwner && assetId && (
+            <div className="p-4 border-b border-border bg-black/30 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-white">
+                  <Lock size={13} className="text-primary" /> Asset Protection
                 </div>
-
-                <div className="space-y-3.5">
-                  <div>
-                    <span className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider">Registered Owner</span>
-                    <div className="text-sm font-medium text-white font-mono mt-1 bg-white/5 border border-border rounded-lg px-3 py-2">
-                      {ownerEmail ? maskEmail(ownerEmail) : "Protected User"}
-                    </div>
-                  </div>
-
-                  <div>
-                    <span className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider">Ownership Verification Status</span>
-                    <div className="mt-1 flex items-center gap-2 text-emerald bg-emerald/10 border border-emerald/20 px-3 py-2 rounded-lg text-xs font-semibold">
-                      <CheckCircle2 size={14} className="shrink-0" />
-                      <span>Verified Owner on Polygon Blockchain</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-4 border-t border-border">
-                <button
-                  onClick={handleContactRequest}
-                  disabled={requestSent}
-                  className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 ${
-                    requestSent
-                      ? "bg-white/5 text-muted-foreground border border-border cursor-not-allowed"
-                      : "bg-gradient-to-r from-primary to-cyber text-primary-foreground hover:opacity-90 hover:scale-[1.01] active:scale-95 cursor-pointer"
+                <span
+                  className={`text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full border ${
+                    enforceBlur
+                      ? "bg-crimson/20 text-crimson border-crimson/40"
+                      : "bg-white/5 text-muted-foreground border-border"
                   }`}
                 >
-                  <Mail size={14} />
-                  {requestSent ? "Contact Request Sent" : "Request Contact with Owner"}
-                </button>
-                <p className="text-[10px] text-center text-muted-foreground mt-2 font-mono">
-                  Your identity remains private until you choose to share it.
-                </p>
+                  {enforceBlur ? "Protection: ON 🔒" : "Protection: OFF"}
+                </span>
               </div>
-            </div>
-          ) : (
-            /* Original Owner's Sighting Map View */
-            <>
-              <div className="p-2 border-b border-border">
-                <WorldMap pins={result.locations} compact />
-              </div>
-              <div className="flex-1 max-h-72 overflow-auto divide-y divide-border">
-                {result.locations.map((loc, i) => (
-                  <motion.div
-                    key={i}
-                    initial={{ opacity: 0, x: 10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.1 + i * 0.08 }}
-                    className="p-4 flex items-center gap-3 hover:bg-white/[0.03]"
+
+              {/* Toggle controls */}
+              <div className="flex items-center justify-between p-3 rounded-xl bg-black/40 border border-border">
+                <div>
+                  <div className="text-xs font-semibold text-white">Blur for other users</div>
+                  <div className="text-[10px] text-muted-foreground mt-0.5">
+                    Hide original asset from non-owners with a blurred preview.
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1 bg-black/60 p-1 rounded-xl border border-border shrink-0">
+                  <button
+                    onClick={() => handleToggleClick(false)}
+                    disabled={isSavingProtection}
+                    className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                      !enforceBlur
+                        ? "bg-white/10 text-white border border-border"
+                        : "text-muted-foreground hover:text-white"
+                    }`}
                   >
-                    <div className="grid h-9 w-9 place-items-center rounded-lg bg-crimson/15 text-crimson shrink-0">
-                      <MapPin size={15} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-sm">{loc.city}, {loc.country}</span>
-                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-crimson/15 text-crimson">
-                          {loc.confidence}% match
-                        </span>
-                      </div>
-                      <div className="mt-0.5 text-[10px] font-mono text-primary/70">
-                        GPS: {loc.lat.toFixed(4)}, {loc.lng.toFixed(4)}
-                      </div>
-                      <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground font-mono">
-                        <span className="flex items-center gap-1">
-                          <Smartphone size={11} /> {loc.device}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <MessageCircle size={11} /> {loc.app}
-                        </span>
-                      </div>
-                    </div>
-                    {isOwner && onWipe && (
-                      <button
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          if (confirm(`Are you sure you want to remove this asset copy at coordinates [${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}]? This will wipe the duplicate asset from the other device/user.`)) {
-                            await onWipe(loc.lat, loc.lng);
-                          }
-                        }}
-                        title="Remove from Device"
-                        className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-semibold bg-crimson/15 hover:bg-crimson/30 border border-crimson/35 text-crimson hover:text-white transition-all scale-[0.98] hover:scale-100 active:scale-[0.96]"
-                      >
-                        <Trash2 size={11} />
-                        Remove
-                      </button>
-                    )}
-                  </motion.div>
-                ))}
-              </div>
-            </>
-          )
-        ) : (
-          <div className="flex-1 grid place-items-center p-10 text-center">
-            <div>
-              <div className="relative mx-auto mb-4 h-16 w-16">
-                <div className="absolute inset-0 rounded-full bg-emerald/30 blur-xl" />
-                <div className="relative grid h-16 w-16 place-items-center rounded-full bg-emerald/15 border border-emerald/30 pulse-ring">
-                  <ShieldCheck className="h-7 w-7 text-emerald" />
+                    OFF
+                  </button>
+                  <button
+                    onClick={() => handleToggleClick(true)}
+                    disabled={isSavingProtection}
+                    className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                      enforceBlur
+                        ? "bg-crimson text-white shadow-[0_0_10px_rgba(220,38,38,0.4)]"
+                        : "text-muted-foreground hover:text-white"
+                    }`}
+                  >
+                    ON 🔒
+                  </button>
                 </div>
               </div>
-              <h3 className="text-lg font-semibold">No unauthorized copies found</h3>
-              <p className="mt-1 text-sm text-muted-foreground max-w-xs mx-auto">
-                Your signature has been written to the ledger. We will alert you if it surfaces.
+
+              {/* Blur Strength Selection */}
+              {enforceBlur && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  className="space-y-2 pt-1"
+                >
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
+                      <SlidersHorizontal size={11} /> Blur Strength
+                    </span>
+                    <span className="font-mono text-[10px] text-primary">{selectedStrength}px</span>
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {BLUR_PRESETS.map((preset) => (
+                      <button
+                        key={preset.value}
+                        onClick={() => setSelectedStrength(preset.value)}
+                        className={`px-2 py-1.5 rounded-lg text-[11px] font-medium border text-center transition-all cursor-pointer ${
+                          selectedStrength === preset.value
+                            ? "bg-primary/20 border-primary text-primary font-bold shadow-sm"
+                            : "bg-black/20 border-border/80 text-muted-foreground hover:text-white"
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={handleSaveStrength}
+                    disabled={isSavingProtection || selectedStrength === blurStrength}
+                    className="w-full mt-2 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold bg-white/5 hover:bg-primary/10 border border-border hover:border-primary/40 text-white disabled:opacity-40 transition-all cursor-pointer"
+                  >
+                    {isSavingProtection && <Loader2 size={11} className="animate-spin" />}
+                    Save Protection Settings
+                  </button>
+                </motion.div>
+              )}
+            </div>
+          )}
+
+          {/* Sighting reports / Distribution details */}
+          {leaked ? (
+            !isOwner ? (
+              <div className="p-6 flex flex-col justify-between space-y-6">
+                <div className="space-y-4">
+                  <div className="p-4 rounded-xl bg-orange-500/10 border border-orange-500/30 text-xs text-orange-400 flex items-start gap-2.5">
+                    <ShieldAlert size={16} className="shrink-0 mt-0.5 text-orange-400" />
+                    <div>
+                      <strong className="text-white block mb-0.5 font-bold text-sm">Asset Already Registered</strong>
+                      This digital asset is registered to another owner.
+                    </div>
+                  </div>
+
+                  <div className="space-y-3.5">
+                    <div>
+                      <span className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider">Registered Owner</span>
+                      <div className="text-sm font-medium text-white font-mono mt-1 bg-white/5 border border-border rounded-lg px-3 py-2">
+                        {ownerEmail ? maskEmail(ownerEmail) : "Protected User"}
+                      </div>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider">Ownership Verification Status</span>
+                      <div className="mt-1 flex items-center gap-2 text-emerald bg-emerald/10 border border-emerald/20 px-3 py-2 rounded-lg text-xs font-semibold">
+                        <CheckCircle2 size={14} className="shrink-0" />
+                        <span>Verified Owner on Polygon Blockchain</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t border-border">
+                  <button
+                    onClick={handleContactRequest}
+                    disabled={requestSent}
+                    className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 ${
+                      requestSent
+                        ? "bg-white/5 text-muted-foreground border border-border cursor-not-allowed"
+                        : "bg-gradient-to-r from-primary to-cyber text-primary-foreground hover:opacity-90 hover:scale-[1.01] active:scale-95 cursor-pointer"
+                    }`}
+                  >
+                    <Mail size={14} />
+                    {requestSent ? "Contact Request Sent" : "Request Contact with Owner"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* Original Owner's Sighting Map View */
+              <>
+                <div className="p-2 border-b border-border">
+                  <WorldMap pins={result.locations} compact />
+                </div>
+                <div className="flex-1 max-h-60 overflow-auto divide-y divide-border">
+                  {result.locations.map((loc, i) => (
+                    <div key={i} className="p-3 flex items-center gap-3 hover:bg-white/[0.03]">
+                      <div className="grid h-8 w-8 place-items-center rounded-lg bg-crimson/15 text-crimson shrink-0">
+                        <MapPin size={14} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-xs text-white">{loc.city}, {loc.country}</span>
+                          <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-crimson/15 text-crimson">
+                            {loc.confidence}% match
+                          </span>
+                        </div>
+                        <div className="mt-0.5 flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
+                          <span><Smartphone size={9} className="inline mr-0.5" />{loc.device}</span>
+                          <span><MessageCircle size={9} className="inline mr-0.5" />{loc.app}</span>
+                        </div>
+                      </div>
+                      {isOwner && onWipe && (
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (confirm(`Remove asset copy at [${loc.lat.toFixed(2)}, ${loc.lng.toFixed(2)}]?`)) {
+                              await onWipe(loc.lat, loc.lng);
+                            }
+                          }}
+                          className="px-2 py-1 rounded text-[10px] font-semibold bg-crimson/15 text-crimson border border-crimson/30 hover:bg-crimson hover:text-white transition-all"
+                        >
+                          <Trash2 size={10} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )
+          ) : (
+            <div className="p-8 text-center space-y-2">
+              <div className="relative mx-auto h-12 w-12">
+                <div className="absolute inset-0 rounded-full bg-emerald/20 blur-lg" />
+                <div className="relative grid h-12 w-12 place-items-center rounded-full bg-emerald/15 border border-emerald/30">
+                  <ShieldCheck className="h-6 w-6 text-emerald" />
+                </div>
+              </div>
+              <h4 className="text-sm font-bold text-white">No unauthorized leaks found</h4>
+              <p className="text-xs text-muted-foreground max-w-xs mx-auto">
+                Asset signatures are verified on the Polygon network ledger.
               </p>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
+
+      {/* Confirmation Modal */}
+      <ProtectionConfirmModal
+        open={pendingBlurState !== null}
+        action={pendingBlurState ? "enable" : "disable"}
+        assetName={fileName || "Selected Asset"}
+        loading={isSavingProtection}
+        onConfirm={handleConfirmProtectionChange}
+        onCancel={() => setPendingBlurState(null)}
+      />
     </motion.div>
   );
 }

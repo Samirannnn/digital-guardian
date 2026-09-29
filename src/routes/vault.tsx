@@ -332,13 +332,16 @@ function VaultPage() {
           <AnimatePresence mode="wait">
             <ResultView
               key="result"
+              assetId={selectedAsset.id}
               imageUrl={selectedAsset.signedUrl ?? ""}
               result={toScanResult(selectedAsset)}
               ownerEmail={selectedAsset.app_email}
               fileName={selectedAsset.name}
+              blurStrength={selectedAsset.blur_strength ?? 20}
               onClose={() => setSelectedAsset(null)}
               isOwner={user ? selectedAsset.user_id === user.id : false}
               onWipe={handleWipe}
+              onRefresh={refetch}
             />
           </AnimatePresence>
         ) : (
@@ -495,10 +498,14 @@ function VaultCard({
             {leaked ? "Compromised" : "Protected"}
           </div>
 
-          {asset.isBlurred && (
-            <div className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold bg-crimson/95 text-white backdrop-blur-md border border-crimson/40">
+          {asset.enforce_blur || asset.isBlurred ? (
+            <div className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold bg-crimson/90 text-white backdrop-blur-md border border-crimson/40">
               <EyeOff size={10} />
-              Censored
+              Protection: ON ({asset.blur_strength ?? 20}px)
+            </div>
+          ) : (
+            <div className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium bg-black/60 text-muted-foreground backdrop-blur-md border border-white/10">
+              Protection: OFF
             </div>
           )}
         </div>

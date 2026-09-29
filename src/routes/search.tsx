@@ -332,22 +332,22 @@ function SearchPage() {
                     {previewUrl && (
                       <div className="relative aspect-[4/3] rounded-xl overflow-hidden bg-black/40">
                         <img
-                          src={previewUrl}
+                          src={
+                            state === "found" && !isCurrentUserOwner && searchResult.isBlurred && searchResult.blurredPreviewUrl
+                              ? searchResult.blurredPreviewUrl
+                              : previewUrl ?? ""
+                          }
                           alt={file?.name}
-                          className={`h-full w-full object-cover transition-all duration-300 ${
-                            state === "found" && !isCurrentUserOwner && searchResult.isBlurred
-                              ? "filter blur-xl brightness-50"
-                              : ""
-                          }`}
+                          className="h-full w-full object-cover transition-all duration-300"
                         />
                         <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent pointer-events-none" />
                         
                         {state === "found" && !isCurrentUserOwner && searchResult.isBlurred && (
-                          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm flex flex-col items-center justify-center p-4 text-center z-10">
-                            <EyeOff className="h-6 w-6 text-crimson mb-1.5 animate-pulse" />
-                            <span className="text-[10px] font-bold text-white uppercase tracking-wider">Preview Restricted</span>
-                            <span className="text-[9px] text-muted-foreground mt-1 max-w-[180px] leading-relaxed">
-                              The verified owner has blurred this asset.
+                          <div className="absolute inset-0 bg-black/75 backdrop-blur-md flex flex-col items-center justify-center p-4 text-center z-10">
+                            <EyeOff className="h-7 w-7 text-crimson mb-1.5 animate-pulse" />
+                            <span className="text-xs font-bold text-white uppercase tracking-wider">🔒 Protected Asset</span>
+                            <span className="text-[10px] text-muted-foreground mt-1 max-w-[200px] leading-relaxed">
+                              This asset has been protected by its owner. Original file remains private.
                             </span>
                           </div>
                         )}
