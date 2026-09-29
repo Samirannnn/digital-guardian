@@ -58,7 +58,6 @@ async function fetchAssets(userId: string): Promise<AssetWithLocations[]> {
   if (error) throw error;
   if (!assets || assets.length === 0) return [];
 
-  // Fetch the current user to get their email & uid
   const { data: { user } } = await supabase.auth.getUser();
   const currentUserId = user?.id;
   const userEmail = user?.email;
@@ -69,19 +68,38 @@ async function fetchAssets(userId: string): Promise<AssetWithLocations[]> {
     .select("*")
     .in("asset_id", ids);
 
+  // Batch query original owner assets for all hashes to check cross-device global blur status
+  const hashes = Array.from(new Set(assets.map((a) => a.hash)));
+  const { data: origAssets } = await supabase
+    .from("assets")
+    .select("id, hash, user_id, app_email, enforce_blur, blur_strength, blurred_preview_path, created_at")
+    .in("hash", hashes)
+    .order("created_at", { ascending: true });
+
+  const origMap = new Map<string, any>();
+  if (origAssets) {
+    for (const oa of origAssets) {
+      if (!origMap.has(oa.hash)) {
+        origMap.set(oa.hash, oa);
+      }
+    }
+  }
+
   // Sign URLs based on secure ownership logic
   const signed = await Promise.all(
     assets.map(async (a: any) => {
-      const isOwner = currentUserId === a.user_id;
-      const isEnforced = a.enforce_blur ?? a.is_blurred ?? false;
+      const orig = origMap.get(a.hash) ?? a;
+      const isOriginalOwner = currentUserId === orig.user_id;
+
+      let isEnforced = orig.enforce_blur ?? orig.is_blurred ?? a.enforce_blur ?? a.is_blurred ?? false;
 
       let targetPath = a.storage_path;
 
-      // SECURITY: If requester is NOT owner AND asset is protected,
-      // return ONLY the blurred preview signed URL. Never expose original path.
-      if (!isOwner && isEnforced) {
-        if (a.blurred_preview_path) {
-          targetPath = a.blurred_preview_path;
+      // SECURITY: If requester is NOT original owner AND asset is protected,
+      // return ONLY the blurred preview signed URL. Never expose original file path.
+      if (!isOriginalOwner && isEnforced) {
+        if (orig.blurred_preview_path || a.blurred_preview_path) {
+          targetPath = orig.blurred_preview_path || a.blurred_preview_path;
         }
       }
 
@@ -97,37 +115,28 @@ async function fetchAssets(userId: string): Promise<AssetWithLocations[]> {
 
   const resultAssets = await Promise.all(
     assets.map(async (a: any) => {
+      const orig = origMap.get(a.hash) ?? a;
       const isDuplicate = a.status === "leaked" && a.app_email !== userEmail;
       
       let locsForAsset: any[] = [];
       
       if (isDuplicate) {
-        // Query the oldest asset with this hash (the original owner's asset)
-        const { data: origAssets } = await supabase
-          .from("assets")
-          .select("id")
-          .eq("hash", a.hash)
-          .order("created_at", { ascending: true })
-          .limit(1);
-          
-        if (origAssets && origAssets.length > 0) {
-          // Fetch the owner's initial register location
+        if (orig) {
           const { data: origLocs } = await supabase
             .from("leak_locations")
             .select("*")
-            .eq("asset_id", origAssets[0].id)
+            .eq("asset_id", orig.id)
             .order("detected_at", { ascending: true })
             .limit(1);
             
           locsForAsset = origLocs ?? [];
         }
       } else {
-        // Owner or clean asset — return all locations
         locsForAsset = (locs ?? []).filter((l) => l.asset_id === a.id);
       }
 
-      const isOwner = currentUserId === a.user_id;
-      let isBlurred = a.enforce_blur ?? a.is_blurred ?? false;
+      const isOriginalOwner = currentUserId === orig.user_id;
+      let isBlurred = orig.enforce_blur ?? orig.is_blurred ?? a.enforce_blur ?? a.is_blurred ?? false;
 
       if (!isBlurred) {
         try {
@@ -141,10 +150,10 @@ async function fetchAssets(userId: string): Promise<AssetWithLocations[]> {
       return {
         ...(a as DbAsset),
         enforce_blur: isBlurred,
-        blur_strength: a.blur_strength ?? 20,
-        blurred_preview_path: a.blurred_preview_path ?? null,
+        blur_strength: orig.blur_strength ?? a.blur_strength ?? 20,
+        blurred_preview_path: orig.blurred_preview_path || a.blurred_preview_path || null,
         signedUrl: urlMap.get(a.id) ?? null,
-        isOwner,
+        isOwner: isOriginalOwner,
         isBlurred,
         locations: locsForAsset.map<LeakLocation>((l) => {
           const parts = l.city.split(", ");
@@ -451,7 +460,20 @@ export async function updateAssetProtection(params: {
     }
   }
 
-  // 3. Update database record (safe payload)
+  // 3. Update database records globally across ALL devices/users with this hash
+  try {
+    await supabase.rpc("enforce_global_asset_blur", {
+      p_owner_id: userId,
+      p_hash: hash,
+      p_enforce_blur: enforceBlur,
+      p_blur_strength: blurStrength,
+      p_blurred_preview_path: blurredPreviewPath,
+    });
+  } catch (rpcErr) {
+    console.warn("Global blur RPC error (falling back to direct owner update):", rpcErr);
+  }
+
+  // Fallback direct update for owner's asset row
   const updatePayload: Record<string, any> = {
     enforce_blur: enforceBlur,
     blur_strength: blurStrength,
